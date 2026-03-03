@@ -103,7 +103,9 @@ FORCEINLINE void store_unaligned_uptr(uptr *addr, uptr val) {
 /* cosmo dylib support is experimental, disable when using cosmo libc
    https://github.com/jart/cosmopolitan/blob/3.3.10/libc/dlopen/dlopen.c#L801 */
 #ifndef __COSMOPOLITAN__
-# define LOAD_SHARED_OBJECT
+# ifndef DISABLE_DYNAMIC_LOAD
+#  define LOAD_SHARED_OBJECT
+# endif
 #endif
 #define USE_MMAP
 #define MMAP_HEAP
@@ -143,7 +145,9 @@ typedef int tputsputcchar;
 
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__DragonFly__)
 #define NOBLOCK O_NONBLOCK
+#ifndef DISABLE_DYNAMIC_LOAD
 #define LOAD_SHARED_OBJECT
+#endif
 #define USE_MMAP
 #define MMAP_HEAP
 #define IEEE_DOUBLE
@@ -174,7 +178,9 @@ typedef int tputsputcchar;
 # define NETBSD
 #endif
 #define NOBLOCK O_NONBLOCK
+#ifndef DISABLE_DYNAMIC_LOAD
 #define LOAD_SHARED_OBJECT
+#endif
 #define USE_MMAP
 #define MMAP_HEAP
 #define IEEE_DOUBLE
@@ -206,7 +212,9 @@ typedef int tputsputcchar;
 #define GETPAGESIZE() S_getpagesize()
 #define GETWD(x) GETCWD(x, _MAX_PATH)
 #define IEEE_DOUBLE
+#ifndef DISABLE_DYNAMIC_LOAD
 #define LOAD_SHARED_OBJECT
+#endif
 #define USE_VIRTUAL_ALLOC
 #define NAN_INCLUDE <math.h>
 #define MAKE_NAN(x) { x = sqrt(-1.0); }
@@ -276,7 +284,9 @@ struct timespec;
 
 #if defined(__OpenBSD__) && !defined(__Bitrig__)
 #define NOBLOCK O_NONBLOCK
+#ifndef DISABLE_DYNAMIC_LOAD
 #define LOAD_SHARED_OBJECT
+#endif
 #define USE_MMAP
 #define MMAP_HEAP
 #define IEEE_DOUBLE
@@ -306,7 +316,9 @@ typedef int tputsputcchar;
 #if defined(__APPLE__)
 #define MACOSX
 #define NOBLOCK O_NONBLOCK
+#ifndef DISABLE_DYNAMIC_LOAD
 #define LOAD_SHARED_OBJECT
+#endif
 #define USE_MMAP
 #define MMAP_HEAP
 #define IEEE_DOUBLE
@@ -356,7 +368,9 @@ typedef int tputsputcchar;
 
 #if defined(__QNX__)
 #define NOBLOCK O_NONBLOCK
+#ifndef DISABLE_DYNAMIC_LOAD
 #define LOAD_SHARED_OBJECT
+#endif
 #define USE_MMAP
 #define MMAP_HEAP
 #define IEEE_DOUBLE
@@ -384,7 +398,9 @@ typedef int tputsputcchar;
 
 #if defined(sun)
 #define NOBLOCK O_NONBLOCK
+#ifndef DISABLE_DYNAMIC_LOAD
 #define LOAD_SHARED_OBJECT
+#endif
 #define USE_MMAP
 #define MMAP_HEAP
 #define IEEE_DOUBLE

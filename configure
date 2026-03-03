@@ -86,6 +86,9 @@ installpetitename="petite"
 installscriptname="scheme-script"
 unamebits=""
 relativeBootFiles=yes
+staticbuild=no
+disabledynload=no
+foreignLibs=""
 disablex11=no
 disablecurses=no
 disableiconv=no
@@ -397,6 +400,23 @@ while [ $# != 0 ] ; do
     --disable-iconv)
       disableiconv=yes
       ;;
+    --static)
+      staticbuild=yes
+      disabledynload=yes
+      disablex11=yes
+      disablecurses=yes
+      disableiconv=yes
+      ;;
+    --foreign-libs=*)
+      foreignLibs=`echo $1 | sed -e 's/^--foreign-libs=//'`
+      if [ "$staticbuild" = "no" ]; then
+        staticbuild=yes
+        disabledynload=yes
+        disablex11=yes
+        disablecurses=yes
+        disableiconv=yes
+      fi
+      ;;
     --enable-libffi)
       libffi=yes
       ;;
@@ -679,6 +699,8 @@ if [ "$help" = "yes" ]; then
   echo "  --disable-x11                     disable X11 support"
   echo "  --disable-curses                  disable [n]curses support"
   echo "  --disable-iconv                   disable iconv support"
+  echo "  --static                          build fully static binary"
+  echo "  --foreign-libs=<path:...>         statically link .a libs for FFI"
   echo "  --enable-libffi                   enable libffi support for pb"
   echo "  --disable-auto-flags              no auto additions to CFLAGS/LDFLAGS/LIBS"
   echo "  --enable-warning-flags            add GCC warning flags to CFLAGS"
@@ -886,23 +908,31 @@ fi
 
 # Add automatic linking flags, unless suppressed by --disable-auto-flags
 if [ "$addflags" = "yes" ] ; then
-  case "${flagsm}" in
-    *le|*gnu)
-        LDFLAGS="${LDFLAGS} -rdynamic"
-        ;;
-    *fb|*nb)
-        LDFLAGS="${LDFLAGS} -rdynamic -L/usr/local/lib"
-        ;;
-    *ob)
-        LDFLAGS="${LDFLAGS} -rdynamic -Wl,--export-dynamic -Wl,-zwxneeded -L/usr/local/lib"
-        ;;
-    *)
-        ;;
-  esac
+  if [ "$staticbuild" = "yes" ] ; then
+    LDFLAGS="${LDFLAGS} -static"
+  else
+    case "${flagsm}" in
+      *le|*gnu)
+          LDFLAGS="${LDFLAGS} -rdynamic"
+          ;;
+      *fb|*nb)
+          LDFLAGS="${LDFLAGS} -rdynamic -L/usr/local/lib"
+          ;;
+      *ob)
+          LDFLAGS="${LDFLAGS} -rdynamic -Wl,--export-dynamic -Wl,-zwxneeded -L/usr/local/lib"
+          ;;
+      *)
+          ;;
+    esac
+  fi
 
   case "${flagsm}" in
     *le|*gnu)
-        LIBS="${LIBS} -lm -ldl ${ncursesLib} -lrt"
+        if [ "$staticbuild" = "yes" ] ; then
+            LIBS="${LIBS} -lm -lrt"
+        else
+            LIBS="${LIBS} -lm -ldl ${ncursesLib} -lrt"
+        fi
         ;;
     *fb|*ob)
         LIBS="${LIBS} ${iconvLib} -lm ${ncursesLib}"
@@ -911,7 +941,11 @@ if [ "$addflags" = "yes" ] ; then
         LIBS="${LIBS} -lm ${cursesLib} -lterminfo"
         ;;
     *s2)
-        LIBS="${LIBS} -lnsl -ldl -lm ${cursesLib} -lrt"
+        if [ "$staticbuild" = "yes" ] ; then
+            LIBS="${LIBS} -lnsl -lm ${cursesLib} -lrt"
+        else
+            LIBS="${LIBS} -lnsl -ldl -lm ${cursesLib} -lrt"
+        fi
         ;;
     *osx)
         LIBS="${LIBS} ${iconvLib} -lm ${ncursesLib}"
@@ -1211,6 +1245,8 @@ installscriptname=$installscriptname
 disablecurses=$disablecurses
 disableiconv=$disableiconv
 disablex11=$disablex11
+disabledynload=$disabledynload
+foreignLibs=$foreignLibs
 enablelibffi=$libffi
 preloadBootFiles=$preloadBootFiles
 alwaysUseBootFile=$alwaysUseBootFile

@@ -73,8 +73,8 @@
   (define c-config-file
     (at-dir "config.h"))
   (define c-config-keys
-    '(disablecurses disablex11 enablelibffi alwaysUseBootFile preloadBootFiles relativeBootFiles
-                    InstallBin InstallLib))
+    '(disablecurses disablex11 disabledynload enablelibffi alwaysUseBootFile preloadBootFiles
+                    relativeBootFiles foreignLibs InstallBin InstallLib))
 
   ;; sources for "kernel.o":
   (define kernel-src-files
@@ -178,6 +178,25 @@
 
   (define preload-files (get-preload-files config at-dir mboot))
 
+  ;; Static build support
+  (define static-build? (equal? (hash-ref config 'disabledynload #f) "yes"))
+  (define foreign-libs-str (or (hash-ref config 'foreignLibs #f) ""))
+  (define foreign-libs (if (equal? foreign-libs-str "")
+                           '()
+                           (string-split foreign-libs-str ":")))
+  (define static-ffi.c (at-dir "static_ffi.c"))
+  (define static-ffi.o (at-dir (.c->.o "static_ffi")))
+  (define static-boot.c (at-dir "static_boot.c"))
+  (define static-boot.o (at-dir (.c->.o "static_boot")))
+  (define static-objs (append (if (pair? foreign-libs) (list static-ffi.o) '())
+                              (if static-build? (list static-boot.o) '())))
+  (define static-lib-inputs (if (pair? foreign-libs)
+                                (map (lambda (p) (if (relative-path? p)
+                                                     (at-dir "../.." p)
+                                                     p))
+                                     foreign-libs)
+                                '()))
+
   (define (compile-one .c .o)
     (c-compile .o .c
                (let* ([config (config-define config cpu)]
@@ -234,16 +253,18 @@
               ,void
               :recur]
 
-     [:target ,exe (,kernel-dep ,@main-objs ,@res-deps ,@preload-files ,(at-source "mingw.zuo"))
+     [:target ,exe (,kernel-dep ,@main-objs ,@static-objs ,@res-deps ,@preload-files ,(at-source "mingw.zuo"))
               ,(lambda (path token)
                  (mkdir-p (path-only path))
                  (c-link path
                          (append main-objs
+                                 static-objs
                                  res-deps
                                  (append
                                   (list kernel-dep)
                                   (if zlib-system-lib '() (list zlib-lib))
                                   (if lz4-system-lib '() (list lz4-lib)))
+                                 static-lib-inputs
                                  (if (and (not msvc?)
                                           (for-windows? config))
                                      (make-mingw-to-ms-link-libraries m (at-dir) config)
@@ -395,7 +416,27 @@
      ,@(map (lambda (.c .o)
               `[:target ,.o (,.c ,@main-hdrs)
                         ,(lambda (.o target)
-                           (compile-one .c .o))])
+                           (define extra-cppflags
+                             (~a (if static-build? " -DSTATIC_BOOT=static_boot_init" "")
+                                 (if (pair? foreign-libs) " -DCUSTOM_INIT=static_ffi_init" "")))
+                           (c-compile .o .c
+                                      (let* ([config (config-define config cpu)]
+                                             [config (config-merge config 'CPPFLAGS
+                                                                   (~a (or (lookup 'mdinclude) "")
+                                                                       extra-cppflags))]
+                                             [config (config-merge config 'CFLAGS (or (lookup 'warningFlags) ""))]
+                                             [config (config-include config
+                                                                     (at-dir (build-path "../boot" m))
+                                                                     (at-dir ".")
+                                                                     (at-source "."))]
+                                             [config (if zlib-system-lib
+                                                         config
+                                                         (config-include config zlib-dir))]
+                                             [config (if (equal? (or (lookup 'LZ4Lib) "") "")
+                                                         (config-include config
+                                                                         (build-path lz4-dir "lib"))
+                                                         config)])
+                                        config)))])
             main-srcs main-objs)
 
      [:depend ,(at-dir (.c->.o "scheme.c")) (,(at-source "itest.c"))]
@@ -426,6 +467,8 @@
                                   "#define DISABLE_CURSES"))
                        (line (and (equal? (hash-ref config 'disablex11 #f) "yes")
                                   "#define DISABLE_X11"))
+                       (line (and (equal? (hash-ref config 'disabledynload #f) "yes")
+                                  "#define DISABLE_DYNAMIC_LOAD"))
                        (line (and (equal? (hash-ref config 'enablelibffi #f) "yes")
                                   "#define ENABLE_LIBFFI"))
                        (line (and (not (for-windows? config))
@@ -484,12 +527,60 @@
                          ;; entry in ;; .gitattributes for build.zuo.
                          (display-to-file "$Format:%H$\ngit\n" (at-mach "revision") :truncate))])))]
 
+     ;; Static FFI: generate and compile registration code for statically linked libraries
+     ,@(if (pair? foreign-libs)
+           `([:target ,static-ffi.c (,(at-source "../tools/gen-static-ffi.sh"))
+                      ,(lambda (path token)
+                         (define p (shell (apply build-shell
+                                                 (cons (string->shell (at-source "../tools/gen-static-ffi.sh"))
+                                                       (map string->shell static-lib-inputs)))
+                                          (hash 'stdout 'pipe)))
+                         (define out (fd-read (hash-ref p 'stdout) eof))
+                         (process-wait (hash-ref p 'process))
+                         (fd-close (hash-ref p 'stdout))
+                         (display-to-file out path :truncate))]
+             [:target ,static-ffi.o (,static-ffi.c ,@kernel-hdrs)
+                      ,(lambda (.o token)
+                         (compile-one static-ffi.c .o))])
+           '())
+
+     ;; Static boot: embed boot files as C byte arrays using xxd -i
+     ,@(if static-build?
+           (let ([petite-boot (at-dir (build-path "../boot" m "petite.boot"))]
+                 [scheme-boot (at-dir (build-path "../boot" m "scheme.boot"))])
+             `([:target ,static-boot.c (,petite-boot ,scheme-boot)
+                        ,(lambda (path token)
+                           (define (xxd-array file-path var-name)
+                             (define p (shell (~a "xxd -i < " (string->shell file-path))
+                                              (hash 'stdout 'pipe)))
+                             (define out (fd-read (hash-ref p 'stdout) eof))
+                             (process-wait (hash-ref p 'process))
+                             (fd-close (hash-ref p 'stdout))
+                             (~a "static const unsigned char " var-name "[] = {\n"
+                                 out "};\n\n"))
+                           (define s
+                             (~a "/* Generated by build.zuo -- do not edit */\n"
+                                 "#include \"scheme.h\"\n\n"
+                                 (xxd-array petite-boot "petite_boot_data")
+                                 (xxd-array scheme-boot "scheme_boot_data")
+                                 "void static_boot_init(void) {\n"
+                                 "    Sregister_boot_file_bytes(\"petite.boot\",\n"
+                                 "        (void *)petite_boot_data, sizeof(petite_boot_data));\n"
+                                 "    Sregister_boot_file_bytes(\"scheme.boot\",\n"
+                                 "        (void *)scheme_boot_data, sizeof(scheme_boot_data));\n"
+                                 "}\n"))
+                           (display-to-file s path :truncate))]
+               [:target ,static-boot.o (,static-boot.c ,@kernel-hdrs)
+                        ,(lambda (.o token)
+                           (compile-one static-boot.c .o))]))
+           '())
+
      ;; keep "_zuo.db" and "_zuo_tc.db" here instead of in "boot" and "bin" directories
      [:db-dir ,(at-dir ".")]
 
      [:target clean ()
               ,(lambda (token)
-                 (map rm* kernel-objs))]
+                 (map rm* (append kernel-objs static-objs)))]
 
      #;(end-make-targets))))
 

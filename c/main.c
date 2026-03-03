@@ -24,9 +24,21 @@
   CUSTOM_INIT may be defined as a function with the signature shown to
   perform boot-time initialization, e.g., registering foreign symbols.
 ****/
-#ifndef CUSTOM_INIT
+#ifdef CUSTOM_INIT
+extern void CUSTOM_INIT(void);
+#else
 #define CUSTOM_INIT ((void (*)(void))0)
 #endif /* CUSTOM_INIT */
+
+/****
+  STATIC_BOOT may be defined as a function that registers embedded boot
+  files via Sregister_boot_file_bytes() before Sbuild_heap() is called.
+  This is used for fully static builds where boot files are compiled
+  into the executable.
+****/
+#ifdef STATIC_BOOT
+extern void STATIC_BOOT(void);
+#endif
 
 /****
   ABNORMAL_EXIT may be defined as a function with the signature shown to
@@ -79,6 +91,9 @@ int wmain(int argc, wchar_t* wargv[], wchar_t* wenvp[]) {
 int main(int argc, const char *argv[]) {
 #endif /* WIN32 */
   int n, new_argc = 1;
+#ifdef STATIC_BOOT
+  int boot_given = 0;
+#endif
 #ifdef SAVEDHEAPS
   int compact = 1, savefile_level = 0;
   const char *savefile = (char *)0;
@@ -131,12 +146,18 @@ int main(int argc, const char *argv[]) {
           exit(1);
         }
         Sregister_boot_executable_relative_file(execpath, argv[n]);
+#ifdef STATIC_BOOT
+        boot_given = 1;
+#endif
       } else if (strcmp(arg,"-B") == 0 || strcmp(arg,"--Boot") == 0) {
         if (++n == argc) {
           (void) fprintf(stderr,"%s requires argument\n", arg);
           exit(1);
         }
         Sregister_boot_relative_file(argv[n]);
+#ifdef STATIC_BOOT
+        boot_given = 1;
+#endif
       } else if (strcmp(arg,"--eedisable") == 0) {
   #ifdef FEATURE_EXPEDITOR
         expeditor_enable = 0;
@@ -290,6 +311,14 @@ int main(int argc, const char *argv[]) {
       }
     }
   }
+
+ /* Register embedded boot files for static builds when no
+  * explicit boot files were given on the command line. */
+#ifdef STATIC_BOOT
+  if (!boot_given) {
+    STATIC_BOOT();
+  }
+#endif
 
  /* must call Sbuild_heap after registering boot and heap files.
   * Sbuild_heap() completes the initialization of the Scheme system

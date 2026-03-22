@@ -5,9 +5,12 @@
 | Severity | Count |
 |----------|-------|
 | Critical | 3 |
-| High | 4 |
-| Medium | 8 |
-| Low | 3 |
+| High | 7 |
+| Medium | 10 |
+| Low | 5 |
+
+**Fixed:** 1-6, 10-11, 13-14, 16, 19-22 (see commit history)
+**Unfixed (design-level):** 7-9, 12, 15, 17-18, 23-29
 
 ---
 
@@ -209,6 +212,99 @@ No C-side validation of the path before `dlopen`. While Scheme-side checks exist
 **File:** `c/ffi.c:603-698`
 
 The `closure_callback` function dereferences vectors without null checks after GC, relying on immobility guarantees. Defensive null checks would be prudent.
+
+---
+
+## Round 2 Findings
+
+### 19. Out-of-bounds array access in vfasl `find_pointer_from_offset` (FIXED)
+
+**File:** `c/vfasl.c:579-589`
+
+```c
+while (p_off >= vspace_offsets[s+1])
+    s++;
+```
+
+No bounds check on `s` against `vspaces_count`. A crafted vfasl file with an offset exceeding all vspace boundaries causes out-of-bounds read past the `vspace_offsets` array.
+
+### 20. Unchecked array index in vfasl `lookup_singleton` (FIXED)
+
+**File:** `c/vfasl.c:610-614`
+
+```c
+v = *(singleton_refs[which-1]);
+```
+
+`singleton_refs` has 14 elements. `which` comes from vfasl data via `UNFIX(*ref)`. No bounds check — a crafted vfasl file can cause out-of-bounds read.
+
+### 21. Undefined variable `name` in HPUX branch (FIXED)
+
+**File:** `c/foreign.c:194`
+
+```c
+v = proc2entry(v,name);  // should be 's', not 'name'
+```
+
+Compilation error on HPUX. The parameter is `s`, not `name`.
+
+### 22. Integer overflow in `path_append` allocation (FIXED)
+
+**File:** `c/self-exe.c:254-257`
+
+```c
+char *r = (char *)malloc(l1 + l2 + 2);
+```
+
+If `l1 + l2 + 2` wraps around due to overflow, a tiny buffer is allocated and subsequent `memcpy` overflows it.
+
+### High (unfixed — require design-level changes)
+
+### 23. Data race on `in_parallel_sweepers` in parallel GC
+
+**File:** `c/gc.c:384, 399, 3098, 3121`
+
+Global `in_parallel_sweepers` is read by sweeper threads via the `SEGMENT_IS_LOCAL` macro without synchronization, and written without holding any lock. On weakly-ordered architectures (ARM, PowerPC), readers can see stale values, causing incorrect sweep decisions.
+
+### 24. TOCTOU race on mark bitmap initialization
+
+**File:** `c/gc.c:505-537`
+
+In parallel GC mode, multiple sweepers can check `!si->forwarded_flonums` or `!si->marked_mask` concurrently, both find NULL, and both initialize — the second write orphans the first allocation and corrupts mark bits.
+
+### 25. Async-signal-unsafe functions in signal handlers
+
+**File:** `c/schsig.c:315-338, 810-826`
+
+Signal handlers call `fprintf`, `alloc_mutex_acquire`, `get_thread_context`, and Scheme allocation (`Scons`, `do_error`). These are not async-signal-safe per POSIX. If a signal arrives while `alloc_mutex` is held, the handler deadlocks.
+
+### 26. Race on `S_collect_waiting_tcs` slot allocation
+
+**File:** `c/thread.c:549-560`
+
+Multiple threads can find the same slot empty in `S_collect_waiting_tcs[]` and both write to it, losing one thread's registration for parallel collection.
+
+### Medium (unfixed)
+
+### 27. `STORE_FENCE` insufficient for mark bitmap publication
+
+**File:** `c/gc.c:505-512`
+
+`init_mask` uses `STORE_FENCE()` before publishing the mask pointer. On ARM/Power, this only orders stores — a reader thread can see the pointer before the `memset` data, reading uninitialized mark bits.
+
+### 28. Oblist resize not mutex-protected
+
+**File:** `c/intern.c:66-101`
+
+`S_resize_oblist()` rebuilds the hash table without holding `tc_mutex`. Concurrent interning can corrupt the oblist during resize.
+
+### Low (unfixed)
+
+### 29. Unbounded recursion in `wrint`
+
+**File:** `c/print.c:312-318`
+
+`wrint()` recurses once per decimal digit of a bignum. Extremely large bignums could overflow the C stack.
 
 ---
 

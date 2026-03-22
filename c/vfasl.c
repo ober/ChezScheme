@@ -582,8 +582,11 @@ static ptr find_pointer_from_offset(uptr p_off, ptr *vspaces, uptr *vspace_offse
   ITYPE t = TYPEBITS(p_off);
 
   p_off = (uptr)UNTYPE(p_off, t);
-  while (p_off >= vspace_offsets[s+1])
+  while (p_off >= vspace_offsets[s+1]) {
     s++;
+    if (s >= vspaces_count)
+      S_error("vfasl-read", "invalid pointer offset");
+  }
 
   return TYPE(ptr_add(vspaces[s], p_off - vspace_offsets[s]), t);
 }
@@ -610,6 +613,8 @@ static ptr *singleton_refs[] = { &S_G.null_string,
 static ptr lookup_singleton(iptr which) {
   ptr v;
 
+  if (which < 1 || which > (iptr)(sizeof(singleton_refs) / sizeof(singleton_refs[0])))
+    S_error("vfasl-read", "invalid singleton index");
   v = *(singleton_refs[which-1]);
 
   if (v == Sfalse) {

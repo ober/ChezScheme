@@ -254,7 +254,11 @@ static char *get_self_path_platform() { return NULL; }
 static char *path_append(const char *s1, const char *s2) {
   size_t l1 = strlen(s1);
   size_t l2 = strlen(s2);
-  char *r = (char *)malloc(l1 + l2 + 2);
+  size_t alloc_size = l1 + l2 + 2;
+  char *r;
+  if (alloc_size < l1 || alloc_size < l2)
+    return NULL;
+  r = (char *)malloc(alloc_size);
   if (r == NULL) {
     return NULL;
   }

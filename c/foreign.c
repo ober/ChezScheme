@@ -191,7 +191,7 @@ void Sforeign_symbol(const char *s, void *v) {
     tc_mutex_acquire();
 
 #ifdef HPUX
-    v = proc2entry(v,name);
+    v = proc2entry(v,s);
 #endif
 
     if ((x = lookup(s)) == addr_to_ptr(0)) {

@@ -460,7 +460,12 @@ static ptr fasl_entry(ptr tc, IFASLCODE situation, faslFile f, ptr externals) {
         case fasl_type_lz4: {
           ptr result; INT bytes_consumed;
           iptr dest_size = S_fasl_uptrin(f, &bytes_consumed);
-          iptr src_size = size - (2 + bytes_consumed); /* adjust for u8 compression type, u8 fasl type, and uptr dest_size */
+          iptr src_size;
+          if (size < (iptr)(2 + bytes_consumed))
+            S_error1("", "malformed fasl-object found in ~a", f->uf.path);
+          src_size = size - (2 + bytes_consumed); /* adjust for u8 compression type, u8 fasl type, and uptr dest_size */
+          if (dest_size < 0)
+            S_error1("", "malformed fasl-object found in ~a", f->uf.path);
 
           if ((uptr)src_size > (uptr)maximum_bytevector_length ||
               (uptr)dest_size > (uptr)maximum_bytevector_length)
@@ -483,6 +488,8 @@ static ptr fasl_entry(ptr tc, IFASLCODE situation, faslFile f, ptr externals) {
         case fasl_type_uncompressed: {
           in_f = f;
           old_mode = f->buffer_mode;
+          if (size < 2)
+            S_error1("", "malformed fasl-object found in ~a", f->uf.path);
           size -= 2;  /* adjust for u8 compression type and u8 fasl type */
           if (size < 0)
             S_error1("", "invalid fasl uncompressed size found in ~a", f->uf.path);
@@ -1236,15 +1243,19 @@ static void faslin(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f) {
 # define unknown 3
 #endif
 static void fasl_record(ptr tc, ptr *x, ptr t, ptr *pstrbuf, faslFile f, iptr size) {
-  iptr n; uptr addr; ptr p; UINT padty;
+  iptr n; uptr addr, addr_base, addr_limit; ptr p; UINT padty;
 
   n = sizein(f);
   *x = p = S_record(size_record_inst(size));
   faslin(tc, &RECORDINSTTYPE(p), t, pstrbuf, f);
-  addr = (uptr)TO_PTR(&RECORDINSTIT(p, 0));
+  addr_base = (uptr)TO_PTR(&RECORDINSTIT(p, 0));
+  addr_limit = addr_base + size;
+  addr = addr_base;
   for (; n != 0; n -= 1) {
     padty = bytein(f);
     addr += padty >> 4;
+    if (addr < addr_base || addr >= addr_limit)
+      S_error1("", "malformed record in fasl object found in ~a", f->uf.path);
     switch (padty & 0xf) {
       case fasl_fld_ptr:
         faslin(tc, TO_VOIDP(addr), t, pstrbuf, f);

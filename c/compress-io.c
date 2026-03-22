@@ -23,6 +23,7 @@
 #include "lz4hc.h"
 #include <fcntl.h>
 #include <errno.h>
+#include <limits.h>
 
 #ifdef WIN32
 #include <io.h>
@@ -429,8 +430,8 @@ static INT glzread_lz4(lz4File_in *lz4, void *buffer, UINT count) {
           return -1;
         }
 
-        lz4->in_pos += (INT)in_len;
-        lz4->out_len = (INT)out_len;
+        lz4->in_pos += (in_len > INT_MAX ? INT_MAX : (INT)in_len);
+        lz4->out_len = (out_len > INT_MAX ? INT_MAX : (INT)out_len);
         lz4->out_pos = 0;
       }
     } else {

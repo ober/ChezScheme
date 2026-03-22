@@ -651,7 +651,7 @@ static void add_boot(boot_desc *boot, const char *path) {
     fprintf(stderr, "boot-file path is too long %s\n", path);
     S_abnormal_exit();
   }
-  strcpy(boot->path, path);
+  memcpy(boot->path, path, strlen(path) + 1);
 }
 
 static IBOOL check_boot(faslFile f, IBOOL verbose, const char *path) {

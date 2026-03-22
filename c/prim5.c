@@ -2228,7 +2228,7 @@ static ptr s_iconv_trouble(HMODULE h, const char *what) {
   FreeLibrary(h);
   n = strlen(what) + strlen(dll) + 17;
   msg = (char *)malloc(n);
-  sprintf(msg, "cannot find %s in %s", what, dll);
+  snprintf(msg, n, "cannot find %s in %s", what, dll);
   free(dll);
   r = Sstring_utf8(msg, -1);
   free(msg);

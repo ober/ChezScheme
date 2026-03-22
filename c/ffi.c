@@ -253,6 +253,8 @@ ffi_type *decode_type(alloc_state *alloc, ptr type, ffi_abi abi, IBOOL *all_floa
 
       ffi_prep_cif(&cif, abi, 0, elem_out, NULL);
 
+      if (len != 0 && elem_out->size > ((size_t)-1) / len)
+        S_error("decode_type", "ffi array size overflow");
       out->size = elem_out->size * len;
       out->alignment = elem_out->alignment;
       out->type = FFI_TYPE_STRUCT;

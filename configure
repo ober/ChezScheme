@@ -1190,23 +1190,23 @@ if [ "$skipImmediateMakefile" = "" ] ; then
     else
         makefile_in=Makefile.in
     fi
-    sed -e 's/$(w)/'$w'/g' "$srcdir"/makefiles/"$makefile_in" > Makefile
+    sed -e 's|$(w)|'"$w"'|g' "$srcdir"/makefiles/"$makefile_in" > Makefile
 fi
 
-mkdir -p $w
+mkdir -p "$w"
 
 if [ "$skipImmediateMakefile" = "" ] ; then
-    # Stub Zuo script to lanch the real one, using "Makefile"
+    # Stub Zuo script to launch the real one, using "Makefile"
     # to locate the workarea:
     cp "$srcdir"/makefiles/buildmain.zuo main.zuo
 fi
 
 # Some idea, but in the workarea, so it refers to "workarea.zuo" here:
-cp "$srcdir"/makefiles/workmain.zuo $w/main.zuo
+cp "$srcdir"/makefiles/workmain.zuo "$w"/main.zuo
 
 # The content of "$w/Mf-config" records configuration decisions,
 # and the Zuo build script takes it from there
-cat > $w/Mf-config << END
+cat > "$w"/Mf-config << END
 srcdir=$srcdir
 upsrcdir=$upsrcdir
 m=$m

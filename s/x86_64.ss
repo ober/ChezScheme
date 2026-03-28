@@ -878,6 +878,9 @@
   (define-instruction effect restore-flrv
     [(op) `(asm ,info ,asm-restore-flrv)])
 
+  (define-instruction effect (endbr64)
+    [(op) `(asm ,info ,asm-endbr64)])
+
   (define-instruction effect invoke-prelude
    ; align sp on 16-byte boundary, taking into account 8-byte
    ; return address already pushed by caller
@@ -896,7 +899,7 @@
                      asm-direct-jump asm-return-address asm-jump asm-conditional-jump
                      asm-lea1 asm-lea2 asm-indirect-call asm-condition-code
                      asm-fl-cvt asm-store-single asm-load-single asm-fpt asm-fptrunc asm-div asm-popcount
-                     asm-exchange asm-pause asm-debug asm-locked-incr asm-locked-decr asm-locked-cmpxchg
+                     asm-exchange asm-pause asm-debug asm-endbr64 asm-locked-incr asm-locked-decr asm-locked-cmpxchg
                      asm-fpsqrt asm-fpop-2 asm-fpmove asm-fpcast asm-fpsingle
                      asm-c-simple-call
                      asm-save-flrv asm-restore-flrv asm-return asm-c-return asm-size
@@ -1031,6 +1034,7 @@
   (define-op rdtsc     two-byte-op     #b1111 #b00110001) ; read time-stamp counter
   (define-op rdpmc     two-byte-op     #b1111 #b00110011) ; read performance monitoring counter
   (define-op pause     two-byte-op #b11110011 #b10010000) ; equivalent to rep nop
+  (define-op endbr64   endbr64-op) ; CET/IBT landing pad: f3 0f 1e fa
 
   (define-op int3      byte-op     #b11001100)
 
@@ -1474,6 +1478,14 @@
       (emit-code (op code*)
         (build byte #x48) ; rex prefix w/rex.w bit set
         (build byte op-code))))
+
+  (define endbr64-op
+    (lambda (op code*)
+      (emit-code (op code*)
+        (build byte #xF3)
+        (build byte #x0F)
+        (build byte #x1E)
+        (build byte #xFA))))
 
   (define push-op
     (lambda (op op-code reg code*)
@@ -2085,6 +2097,10 @@
   (define asm-debug
     (lambda (code*)
       (emit int3 code*)))
+
+  (define asm-endbr64
+    (lambda (code*)
+      (emit endbr64 code*)))
 
   (define asm-exchange
     (lambda (code* dest src0 src1)
@@ -3412,6 +3428,7 @@ incoming           +---------------------------+ <- 16-byte boundary
                   (values
                    (lambda ()
                      (%seq
+                      ,(%inline endbr64) ; CET/IBT: landing pad for indirect calls from C
                       ,(if-feature windows
                          (%seq
                            ,(%inline push ,%rbx)

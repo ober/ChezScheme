@@ -682,6 +682,9 @@
     [(op)
      `(asm ,info ,(asm-fence 'release))])
 
+  (define-instruction effect (endbr64)
+    [(op) '()]) ; x86_64-only CET/IBT; no-op on this architecture
+
   (define-instruction effect (pause)
     ;; NB: use sqrt or something like that?
     [(op) '()])

@@ -714,6 +714,9 @@
            ;; NB: may modify %eax:
            `(asm ,info ,asm-locked-cmpxchg ,x ,y ,w ,ueax ,new))))])
 
+  (define-instruction effect (endbr64)
+    [(op) '()]) ; x86_64-only CET/IBT; no-op on this architecture
+
   (define-instruction effect (pause)
     [(op) `(asm ,info ,asm-pause)])
 

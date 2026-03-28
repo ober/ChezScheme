@@ -660,6 +660,7 @@
   (declare-primitive flds effect #f) ; x86
   (declare-primitive inc-cc-counter effect #f)
   (declare-primitive inc-profile-counter effect #f)
+  (declare-primitive endbr64 effect #f) ; x86_64 CET/IBT landing pad
   (declare-primitive invoke-prelude effect #f)
   (declare-primitive keep-live effect #f)
   (declare-primitive locked-decr! effect #f)

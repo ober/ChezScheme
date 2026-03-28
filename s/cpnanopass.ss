@@ -5677,6 +5677,7 @@
            (let ([tlbody (Tail tlbody)])
              (%seq
                (label ,dcl)
+               ,(%inline endbr64) ; CET/IBT: landing pad at every function entry
                ; TODO: don't want to save ret for leaf routines
                ; TODO: don't necessarily want to position ret save here
                ,(meta-cond

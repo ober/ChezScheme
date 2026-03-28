@@ -595,6 +595,9 @@
   (define-instruction effect (store-store-fence acquire-fence release-fence)
     [(op) `(asm ,info ,asm-fence)])
 
+  (define-instruction effect (endbr64)
+    [(op) '()]) ; x86_64-only CET/IBT; no-op on this architecture
+
   (define-instruction effect (pause)
     [(op) `(asm ,info ,asm-fence)])
 

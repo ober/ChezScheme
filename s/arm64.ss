@@ -683,7 +683,7 @@
      `(asm ,info ,(asm-fence 'release))])
 
   (define-instruction effect (endbr64)
-    [(op) '()]) ; x86_64-only CET/IBT; no-op on this architecture
+    [(op) `(asm ,info ,asm-bti)]) ; ARM BTI landing pad (equivalent of x86_64 ENDBR64)
 
   (define-instruction effect (pause)
     ;; NB: use sqrt or something like that?
@@ -737,7 +737,7 @@
                      asm-fpop-2 asm-fpsqrt asm-c-simple-call
                      asm-return asm-c-return asm-size
                      asm-enter asm-foreign-call asm-foreign-callable
-                     asm-debug
+                     asm-debug asm-bti
                      asm-read-counter
                      asm-inc-cc-counter
                      signed9? unsigned12? aligned-offset? funkymask shifted16
@@ -973,6 +973,7 @@
   (define-op mrs  mrs-op)
 
   (define-op und  und-op)
+  (define-op bti  bti-op)  ; ARM BTI c (Branch Target Identification)
 
   (define-op fadd  f-arith-op  #b0010) ; selector is at bit 12
   (define-op fsub  f-arith-op  #b0011)
@@ -1436,6 +1437,19 @@
     (lambda (op code*)
       (emit-code (op code*)
         [0 0])))
+
+  ; BTI c instruction: 0xD503245F
+  ; Marks a valid landing pad for indirect calls (call target identification)
+  ; ARM equivalent of x86_64 ENDBR64
+  (define bti-op
+    (lambda (op code*)
+      (emit-code (op code*)
+        [22 #b1101010100]
+        [16 #b000011]
+        [12 #b0010]
+        [8  #b0100]
+        [5  #b010]
+        [0  #b11111])))
 
   ;; asm helpers
 
@@ -2097,6 +2111,10 @@
   (define asm-debug
     (lambda (code*)
       (emit und code*)))
+
+  (define asm-bti
+    (lambda (code*)
+      (emit bti code*)))
 
   (define asm-read-counter
     (lambda (op0 op1 crn crm op2)
@@ -3368,6 +3386,7 @@
                     (values
                      (lambda ()
                        (%seq
+                        ,(%inline endbr64) ; ARM BTI: landing pad for indirect calls from C
                         ;; save argument register values to the stack so we don't lose the values
                         ;; across possible calls to C while setting up the tc and allocating memory
                         ,(if (null? arg-regs) `(nop) `(inline ,(make-info-kill*-live* '() arg-regs) ,%push-multiple))

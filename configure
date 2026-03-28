@@ -92,6 +92,8 @@ foreignLibs=""
 disablex11=no
 disablecurses=no
 disableiconv=no
+enableharden=no
+hardenLinkFlags=""
 addflags=yes
 addwarningflags=no
 default_warning_flags="-Wpointer-arith -Wall -Wextra -Wno-implicit-fallthrough"
@@ -431,6 +433,9 @@ while [ $# != 0 ] ; do
     --enable-warning-flags)
       addwarningflags=yes
       ;;
+    --enable-harden)
+      enableharden=yes
+      ;;
     --libkernel)
       Kernel=KernelLib
       ;;
@@ -709,6 +714,7 @@ if [ "$help" = "yes" ]; then
   echo "  --enable-libffi                   enable libffi support for pb"
   echo "  --disable-auto-flags              no auto additions to CFLAGS/LDFLAGS/LIBS"
   echo "  --enable-warning-flags            add GCC warning flags to CFLAGS"
+  echo "  --enable-harden                  add security hardening CFLAGS/LDFLAGS"
   echo "  --libkernel                       build libkernel.a (the default)"
   echo "  --kernelobj                       build kernel.o instead of libkernel.a"
   echo "  --installprefix=<pathname>        final installation root ($installprefix)"
@@ -887,6 +893,34 @@ fi
 if [ "$addflags" = "yes" ] ; then
     if [ "$threadFlags" != "" ] ; then
         CFLAGS="${CFLAGS} ${threadFlags}"
+    fi
+fi
+
+# Add security hardening flags
+if [ "$enableharden" = "yes" ] ; then
+    CFLAGS="${CFLAGS} -fstack-protector-strong -fstack-clash-protection"
+    CFLAGS="${CFLAGS} -D_FORTIFY_SOURCE=2"
+    case "${flagsmuni}" in
+      a6le)
+          # Full CET (shadow stack + indirect branch tracking) on x86_64 Linux
+          CFLAGS="${CFLAGS} -fcf-protection=full"
+          ;;
+      a6*)
+          # CET not supported on non-Linux x86_64 (FreeBSD, etc.)
+          ;;
+      arm64*)
+          # ARM BTI + PAC via branch-protection flag
+          CFLAGS="${CFLAGS} -mbranch-protection=standard"
+          ;;
+    esac
+    LDFLAGS="${LDFLAGS} -Wl,-z,relro,-z,now"
+    if [ "$staticbuild" != "yes" ] ; then
+        # -fPIC generates position-independent code needed for both PIE
+        # executables and shared libraries (tests build .so files).
+        # -pie goes in mdlinkflags (executable-only) rather than LDFLAGS
+        # (which is inherited by test shared-object compilation).
+        CFLAGS="${CFLAGS} -fPIC"
+        hardenLinkFlags="-pie"
     fi
 fi
 
@@ -1093,6 +1127,11 @@ case "${flagsmuni}" in
         mdlinkflags="-s EXIT_RUNTIME=1 -s ALLOW_MEMORY_GROWTH=1"
         ;;
 esac
+
+# Add hardening link flags to executable-only link flags
+if [ "$enableharden" = "yes" -a "$hardenLinkFlags" != "" ] ; then
+    mdlinkflags="${mdlinkflags} ${hardenLinkFlags}"
+fi
 
 # pre- and post-link-executable step for c/Mf-unix
 case "${flagsmuni}" in

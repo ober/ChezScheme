@@ -179,12 +179,8 @@
     (shell/wait* "rm" "-f" f))
   (define (rm-rf d)
     (shell/wait* "rm" "-rf" d))
-  (define haiku? (glob-match? "*hk" m))
   (define (ln-f from to)
-    (if haiku?
-        ;; no hard links on BeFS
-        (shell/wait* "ln" "-s" from to)
-        (shell/wait* "ln" "-f" from to)))
+    (shell/wait* "cp" "-f" from to))
   (define (ln-s from to)
     (shell/wait* "ln" "-s" from to))
 

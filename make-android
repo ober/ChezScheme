@@ -1,0 +1,26 @@
+#!/bin/sh
+# Build and install Chez Scheme on Android (Termux)
+#
+# Prerequisites:
+#   pkg install libiconv build-essential
+#
+# Usage:
+#   ./make-android           # configure + build
+#   ./make-android install   # configure + build + install
+
+set -e
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+
+./configure \
+  --disable-x11 \
+  --installprefix="$PREFIX" \
+  LDFLAGS="-L$PREFIX/lib" \
+  CFLAGS="-I$PREFIX/include" \
+  LIBS="-liconv"
+
+make
+
+if [ "$1" = "install" ]; then
+  make install
+fi

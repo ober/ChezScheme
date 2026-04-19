@@ -792,23 +792,23 @@ Documentation notes:
 
   (set-who! hashtable-weak?
     (lambda (h)
-      (unless (xht? h) ($oops who "~s is not a hashtable" h))
-      (case (xht-type h)
-        [(eq) (eq? (constant eq-hashtable-subtype-weak) (eq-ht-subtype h))]
-        [(eqv) (eq? (constant eq-hashtable-subtype-weak) (eq-ht-subtype (eqv-ht-eqht h)))]
-        [(generic) (let ([eq-ht (gen-ht-eqht h)])
-                     (and eq-ht (eq? (constant eq-hashtable-subtype-weak) (eq-ht-subtype eq-ht))))]
-        [else #f])))
+      (cond
+        [(eq-ht? h) (eq? (constant eq-hashtable-subtype-weak) (eq-ht-subtype h))]
+        [(eqv-ht? h) (eq? (constant eq-hashtable-subtype-weak) (eq-ht-subtype (eqv-ht-eqht h)))]
+        [(gen-ht? h) (let ([eq-ht (gen-ht-eqht h)])
+                       (and eq-ht (eq? (constant eq-hashtable-subtype-weak) (eq-ht-subtype eq-ht))))]
+        [(symbol-ht? h) #f]
+        [else ($oops who "~s is not a hashtable" h)])))
 
   (set-who! hashtable-ephemeron?
     (lambda (h)
-      (unless (xht? h) ($oops who "~s is not a hashtable" h))
-      (case (xht-type h)
-        [(eq) (eq? (constant eq-hashtable-subtype-ephemeron) (eq-ht-subtype h))]
-        [(eqv) (eq? (constant eq-hashtable-subtype-ephemeron) (eq-ht-subtype (eqv-ht-eqht h)))]
-        [(generic) (let ([eq-ht (gen-ht-eqht h)])
-                     (and eq-ht (eq? (constant eq-hashtable-subtype-ephemeron) (eq-ht-subtype eq-ht))))]
-        [else #f])))
+      (cond
+        [(eq-ht? h) (eq? (constant eq-hashtable-subtype-ephemeron) (eq-ht-subtype h))]
+        [(eqv-ht? h) (eq? (constant eq-hashtable-subtype-ephemeron) (eq-ht-subtype (eqv-ht-eqht h)))]
+        [(gen-ht? h) (let ([eq-ht (gen-ht-eqht h)])
+                       (and eq-ht (eq? (constant eq-hashtable-subtype-ephemeron) (eq-ht-subtype eq-ht))))]
+        [(symbol-ht? h) #f]
+        [else ($oops who "~s is not a hashtable" h)])))
 
   (set-who! symbol-hashtable-ref
     (lambda (h x v)
@@ -956,13 +956,13 @@ Documentation notes:
       (case-lambda
         [(h) (hashtable-copy h #f)]
         [(h mutable?)
-         (unless (xht? h)
-           ($oops 'hashtable-copy "~s is not a hashtable" h))
-         (case (xht-type h)
-           [(eq) ($eq-hashtable-copy h (and mutable? #t))]
-           [(symbol) ($symbol-hashtable-copy h (and mutable? #t))]
-           [(eqv) ($eqv-hashtable-copy h (and mutable? #t))]
-           [else ($gen-hashtable-copy h (and mutable? #t))])])))
+         (let ([m (and mutable? #t)])
+           (cond
+             [(eq-ht? h) ($eq-hashtable-copy h m)]
+             [(symbol-ht? h) ($symbol-hashtable-copy h m)]
+             [(eqv-ht? h) ($eqv-hashtable-copy h m)]
+             [(gen-ht? h) ($gen-hashtable-copy h m)]
+             [else ($oops 'hashtable-copy "~s is not a hashtable" h)]))])))
 
   (set-who! hashtable-clear!
     (let ()
@@ -972,26 +972,26 @@ Documentation notes:
            ($oops who "~s is not a hashtable" h))
          (unless (xht-mutable? h)
            ($oops who "~s is not mutable" h))
-         (case (xht-type h)
-           [(eq) ($eq-hashtable-clear! h (ht-minlen h))]
-           [(eqv)
-            (let ([h (eqv-ht-eqht h)]) ($eq-hashtable-clear! h (ht-minlen h)))
-            (let ([h (eqv-ht-genht h)]) ($gen-hashtable-clear! h (ht-minlen h)))]
-           [(generic) ($gen-hashtable-clear! h (ht-minlen h))]
-           [else ($ht-hashtable-clear! h (ht-minlen h))])]
+         (cond
+           [(eq-ht? h) ($eq-hashtable-clear! h (ht-minlen h))]
+           [(symbol-ht? h) ($ht-hashtable-clear! h (ht-minlen h))]
+           [(eqv-ht? h)
+            (let ([eqh (eqv-ht-eqht h)]) ($eq-hashtable-clear! eqh (ht-minlen eqh)))
+            (let ([genh (eqv-ht-genht h)]) ($gen-hashtable-clear! genh (ht-minlen genh)))]
+           [else ($gen-hashtable-clear! h (ht-minlen h))])]
         [(h k)
          (unless (xht? h)
            ($oops who "~s is not a hashtable" h))
          (unless (xht-mutable? h)
            ($oops who "~s is not mutable" h))
          (let ([minlen (size->minlen who k)])
-           (case (xht-type h)
-             [(eq) ($eq-hashtable-clear! h minlen)]
-             [(eqv)
+           (cond
+             [(eq-ht? h) ($eq-hashtable-clear! h minlen)]
+             [(symbol-ht? h) ($ht-hashtable-clear! h minlen)]
+             [(eqv-ht? h)
               ($eq-hashtable-clear! (eqv-ht-eqht h) minlen)
               ($gen-hashtable-clear! (eqv-ht-genht h) minlen)]
-             [(generic) ($gen-hashtable-clear! h minlen)]
-             [else ($ht-hashtable-clear! h minlen)]))])))
+             [else ($gen-hashtable-clear! h minlen)]))])))
 
   (let ()
     (define (invalid-length who max-sz)
@@ -1004,12 +1004,12 @@ Documentation notes:
         [(_ who $eq-hashtable-content $eqv-hashtable-content $gen-hashtable-content $ht-hashtable-content)
          (let ()
            (define (dispatch h max-sz)
-             (unless (xht? h) (invalid-table who h))
-             (case (xht-type h)
-               [(eq) ($eq-hashtable-content h max-sz)]
-               [(eqv) ($eqv-hashtable-content h max-sz)]
-               [(generic) ($gen-hashtable-content h max-sz)]
-               [else ($ht-hashtable-content h max-sz)]))
+             (cond
+               [(eq-ht? h) ($eq-hashtable-content h max-sz)]
+               [(symbol-ht? h) ($ht-hashtable-content h max-sz)]
+               [(eqv-ht? h) ($eqv-hashtable-content h max-sz)]
+               [(gen-ht? h) ($gen-hashtable-content h max-sz)]
+               [else (invalid-table who h)]))
            (case-lambda
             [(h max-sz)
              (cond
@@ -1031,12 +1031,12 @@ Documentation notes:
 
     (set-who! #(r6rs: hashtable-keys)
       (lambda (h)
-        (unless (xht? h) (invalid-table who h))
-        (case (xht-type h)
-          [(eq) ($eq-hashtable-keys h (most-positive-fixnum))]
-          [(eqv) ($eqv-hashtable-keys h (most-positive-fixnum))]
-          [(generic) ($gen-hashtable-keys h (most-positive-fixnum))]
-          [else ($ht-hashtable-keys h (most-positive-fixnum))])))
+        (cond
+          [(eq-ht? h) ($eq-hashtable-keys h (most-positive-fixnum))]
+          [(symbol-ht? h) ($ht-hashtable-keys h (most-positive-fixnum))]
+          [(eqv-ht? h) ($eqv-hashtable-keys h (most-positive-fixnum))]
+          [(gen-ht? h) ($gen-hashtable-keys h (most-positive-fixnum))]
+          [else (invalid-table who h)])))
 
     (set-who! hashtable-values
       (hashtable-content-dispatch who
@@ -1054,12 +1054,12 @@ Documentation notes:
 
     (set-who! #(r6rs: hashtable-entries)
       (lambda (h)
-        (unless (xht? h) (invalid-table who h))
-        (case (xht-type h)
-          [(eq) ($eq-hashtable-entries h (most-positive-fixnum))]
-          [(eqv) ($eqv-hashtable-entries h (most-positive-fixnum))]
-          [(generic) ($gen-hashtable-entries h (most-positive-fixnum))]
-          [else ($ht-hashtable-entries h (most-positive-fixnum))])))
+        (cond
+          [(eq-ht? h) ($eq-hashtable-entries h (most-positive-fixnum))]
+          [(symbol-ht? h) ($ht-hashtable-entries h (most-positive-fixnum))]
+          [(eqv-ht? h) ($eqv-hashtable-entries h (most-positive-fixnum))]
+          [(gen-ht? h) ($gen-hashtable-entries h (most-positive-fixnum))]
+          [else (invalid-table who h)])))
 
     (set-who! $hashtable-cells
       (hashtable-content-dispatch who
@@ -1078,11 +1078,11 @@ Documentation notes:
       (unless (and (integer? max-sz) (exact? max-sz) (not (negative? max-sz)))
         ($oops who "~s is not a valid length" max-sz))
       (let ([max-sz (if (fixnum? max-sz) max-sz (hashtable-size h))])
-        (case (xht-type h)
-          [(eq) ($eq-hashtable-cells h max-sz)]
-          [(eqv) ($eqv-hashtable-cells h max-sz)]
-          [(generic) ($gen-hashtable-cells h max-sz)]
-          [else ($ht-hashtable-cells h max-sz)]))]
+        (cond
+          [(eq-ht? h) ($eq-hashtable-cells h max-sz)]
+          [(symbol-ht? h) ($ht-hashtable-cells h max-sz)]
+          [(eqv-ht? h) ($eqv-hashtable-cells h max-sz)]
+          [else ($gen-hashtable-cells h max-sz)]))]
      [(h)
       (hashtable-cells h (and (xht? h) (hashtable-size h)))]))
 
@@ -1093,12 +1093,13 @@ Documentation notes:
                                 (ht-size eqht)
                                 (ht-size h))))])
       (lambda (h)
-        (unless (xht? h) ($oops 'hashtable-size "~s is not a hashtable" h))
-        (case (xht-type h)
-          [(eqv) (fx+ (ht-size (eqv-ht-eqht h))
-                      ($gen-ht-size (eqv-ht-genht h)))]
-          [(generic) ($gen-ht-size h)]
-          [else (ht-size h)]))))
+        (cond
+          [(eq-ht? h) (ht-size h)]
+          [(symbol-ht? h) (ht-size h)]
+          [(eqv-ht? h) (fx+ (ht-size (eqv-ht-eqht h))
+                            ($gen-ht-size (eqv-ht-genht h)))]
+          [(gen-ht? h) ($gen-ht-size h)]
+          [else ($oops 'hashtable-size "~s is not a hashtable" h)]))))
 
   (set! hashtable-mutable?
     (lambda (h)
@@ -1124,20 +1125,21 @@ Documentation notes:
 
   (set-who! hashtable-hash-function
     (lambda (h)
-      (unless (xht? h) ($oops who "~s is not an eq hashtable" h))
-      (case (xht-type h)
-        [(eq eqv) #f]
-        [(symbol) symbol-hash]
-        [else (gen-ht-hash h)])))
+      (cond
+        [(eq-ht? h) #f]
+        [(symbol-ht? h) symbol-hash]
+        [(eqv-ht? h) #f]
+        [(gen-ht? h) (gen-ht-hash h)]
+        [else ($oops who "~s is not an eq hashtable" h)])))
 
   (set-who! hashtable-equivalence-function
     (lambda (h)
-      (unless (xht? h) ($oops who "~s is not an eq hashtable" h))
-      (case (xht-type h)
-        [(eq) eq?]
-        [(symbol) (symbol-ht-equiv? h)]
-        [(eqv) eqv?]
-        [else (gen-ht-equiv? h)])))
+      (cond
+        [(eq-ht? h) eq?]
+        [(symbol-ht? h) (symbol-ht-equiv? h)]
+        [(eqv-ht? h) eqv?]
+        [(gen-ht? h) (gen-ht-equiv? h)]
+        [else ($oops who "~s is not an eq hashtable" h)])))
 
   (let ()
     (define (hcabs hc) (if (fx< hc 0) (fxnot hc) hc))

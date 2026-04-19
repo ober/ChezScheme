@@ -861,40 +861,38 @@ Documentation notes:
 
   (set-who! hashtable-ref
     (lambda (h x v)
-      (unless (xht? h)
-        ($oops who "~s is not a hashtable" h))
-      (case (xht-type h)
-        [(eq) (#3%eq-hashtable-ref h x v)]
-        [(symbol)
+      (cond
+        [(eq-ht? h) (#3%eq-hashtable-ref h x v)]
+        [(symbol-ht? h)
          (unless (symbol? x) ($oops 'symbol-hash "~s is not a symbol" x))
          (#3%symbol-hashtable-ref h x v)]
-        [(eqv) ($eqv-hashtable-ref h x v who)]
-        [else ($gen-hashtable-ref h x v who)])))
+        [(eqv-ht? h) ($eqv-hashtable-ref h x v who)]
+        [(gen-ht? h) ($gen-hashtable-ref h x v who)]
+        [else ($oops who "~s is not a hashtable" h)])))
 
   (set-who! hashtable-ref-cell
     (lambda (h x)
       (unless (xht? h)
         ($oops who "~s is not a hashtable" h))
       (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
-      (case (xht-type h)
-        [(eq) (#3%eq-hashtable-ref-cell h x)]
-        [(symbol)
+      (cond
+        [(eq-ht? h) (#3%eq-hashtable-ref-cell h x)]
+        [(symbol-ht? h)
          (unless (symbol? x) ($oops 'symbol-hash "~s is not a symbol" x))
          (#3%symbol-hashtable-ref-cell h x)]
-        [(eqv) ($eqv-hashtable-ref-cell h x who)]
+        [(eqv-ht? h) ($eqv-hashtable-ref-cell h x who)]
         [else ($gen-hashtable-ref-cell h x who)])))
 
   (set-who! hashtable-contains?
     (lambda (h x)
-      (unless (xht? h)
-        ($oops who "~s is not a hashtable" h))
-      (case (xht-type h)
-        [(eq) (#3%eq-hashtable-contains? h x)]
-        [(symbol)
+      (cond
+        [(eq-ht? h) (#3%eq-hashtable-contains? h x)]
+        [(symbol-ht? h)
          (unless (symbol? x) ($oops 'symbol-hash "~s is not a symbol" x))
          (#3%symbol-hashtable-contains? h x)]
-        [(eqv) ($eqv-hashtable-contains? h x who)]
-        [else ($gen-hashtable-contains? h x who)])))
+        [(eqv-ht? h) ($eqv-hashtable-contains? h x who)]
+        [(gen-ht? h) ($gen-hashtable-contains? h x who)]
+        [else ($oops who "~s is not a hashtable" h)])))
 
   (set-who! hashtable-set!
     (lambda (h x v)
@@ -902,12 +900,12 @@ Documentation notes:
         ($oops who "~s is not a hashtable" h))
       (unless (xht-mutable? h)
         ($oops who "~s is not mutable" h))
-      (case (xht-type h)
-        [(eq) (#3%eq-hashtable-set! h x v)]
-        [(symbol)
+      (cond
+        [(eq-ht? h) (#3%eq-hashtable-set! h x v)]
+        [(symbol-ht? h)
          (unless (symbol? x) ($oops 'symbol-hash "~s is not a symbol" x))
          (#3%symbol-hashtable-set! h x v)]
-        [(eqv) ($eqv-hashtable-set! h x v who)]
+        [(eqv-ht? h) ($eqv-hashtable-set! h x v who)]
         [else ($gen-hashtable-set! h x v who)])))
 
   (set-who! hashtable-update!
@@ -918,12 +916,12 @@ Documentation notes:
         ($oops who "~s is not mutable" h))
       (unless (procedure? p)
         ($oops who "~s is not a procedure" p))
-      (case (xht-type h)
-        [(eq) (#3%eq-hashtable-update! h x p v)]
-        [(symbol)
+      (cond
+        [(eq-ht? h) (#3%eq-hashtable-update! h x p v)]
+        [(symbol-ht? h)
          (unless (symbol? x) ($oops 'symbol-hash "~s is not a symbol" x))
          (#3%symbol-hashtable-update! h x p v)]
-        [(eqv) ($eqv-hashtable-update! h x p v who)]
+        [(eqv-ht? h) ($eqv-hashtable-update! h x p v who)]
         [else ($gen-hashtable-update! h x p v who)])))
 
   (set-who! hashtable-cell
@@ -931,12 +929,12 @@ Documentation notes:
       (unless (xht? h)
         ($oops who "~s is not a hashtable" h))
       (unless (xht-mutable? h) ($oops who "~s is not mutable" h))
-      (case (xht-type h)
-        [(eq) (#3%eq-hashtable-cell h x v)]
-        [(symbol)
+      (cond
+        [(eq-ht? h) (#3%eq-hashtable-cell h x v)]
+        [(symbol-ht? h)
          (unless (symbol? x) ($oops 'symbol-hash "~s is not a symbol" x))
          (#3%symbol-hashtable-cell h x v)]
-        [(eqv) ($eqv-hashtable-cell h x v who)]
+        [(eqv-ht? h) ($eqv-hashtable-cell h x v who)]
         [else ($gen-hashtable-cell h x v who)])))
 
   (set-who! hashtable-delete!
@@ -945,12 +943,12 @@ Documentation notes:
         ($oops who "~s is not a hashtable" h))
       (unless (xht-mutable? h)
         ($oops who "~s is not mutable" h))
-      (case (xht-type h)
-        [(eq) (#3%eq-hashtable-delete! h x)]
-        [(symbol)
+      (cond
+        [(eq-ht? h) (#3%eq-hashtable-delete! h x)]
+        [(symbol-ht? h)
          (unless (symbol? x) ($oops 'symbol-hash "~s is not a symbol" x))
          (#3%symbol-hashtable-delete! h x)]
-        [(eqv) ($eqv-hashtable-delete! h x who)]
+        [(eqv-ht? h) ($eqv-hashtable-delete! h x who)]
         [else ($gen-hashtable-delete! h x who)])))
 
   (set! hashtable-copy

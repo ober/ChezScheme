@@ -3,6 +3,14 @@
 Branch: `features/jerboa-perf`
 Baseline: `07f3fd90 newhash: dispatch generic hashtable ops via sealed-record predicates`
 
+## Landed
+
+- `07f3fd90` newhash: core hashtable ops dispatch via sealed-RTD predicates
+- `1c7da443` newhash: sealed-RTD dispatch extended to bulk / introspection ops
+- `0cba64de` cptypes: statically specialize generic hashtable ops to `#3%eq-hashtable-*` / `#3%symbol-hashtable-*` when first arg's subtype is known
+- `bench/jerboa-bench.ss`: baseline Jerboa-shaped workload bench
+- Verified: `hash.mo`, `cptypes.mo`, `5_6.mo`, `record.mo` all clean after all three landed commits
+
 ## Context
 
 Jerboa is a Gerbil-inspired Scheme dialect that sits on Chez. Its prelude funnels user code through a handful of hot primitives: hashtables, records (defstruct / defrecord / defclass), method dispatch (`~` / `{method obj ...}`), pattern matching (`match`), iterators (`for`, `for/collect`, `for/fold`), result types (`ok` / `err`), regex, and string ops. The commit above tightened hashtable hot-op dispatch from `case (xht-type)` to sealed-RTD predicates. This plan extends that approach across the rest of the surfaces Jerboa programs hit in a tight loop.

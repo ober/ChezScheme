@@ -1240,7 +1240,36 @@ Notes:
                                   (and (eq? ctxt 'test)
                                        (pred-env-add/ref ntypes val (rtd->record-predicate rtd #t) plxc))
                                   #f)]))])
-      
+
+      (let ()
+        (define (specialize-ht-op prim-name first-arg-type)
+          (cond
+            [(predicate-implies? first-arg-type $eq-ht-pred)
+             (case prim-name
+               [(hashtable-ref) 'eq-hashtable-ref]
+               [(hashtable-set!) 'eq-hashtable-set!]
+               [(hashtable-contains?) 'eq-hashtable-contains?]
+               [(hashtable-delete!) 'eq-hashtable-delete!]
+               [(hashtable-update!) 'eq-hashtable-update!]
+               [else #f])]
+            [(predicate-implies? first-arg-type $symbol-ht-pred)
+             (case prim-name
+               [(hashtable-ref) 'symbol-hashtable-ref]
+               [(hashtable-set!) 'symbol-hashtable-set!]
+               [(hashtable-contains?) 'symbol-hashtable-contains?]
+               [(hashtable-delete!) 'symbol-hashtable-delete!]
+               [(hashtable-update!) 'symbol-hashtable-update!]
+               [else #f])]
+            [else #f]))
+        (define-specialize 2 (hashtable-ref hashtable-set! hashtable-contains?
+                              hashtable-delete! hashtable-update!)
+          [e* (and (pair? e*)
+                   (let* ([r* (get-type e*)]
+                          [alt-name (specialize-ht-op prim-name (car r*))])
+                     (and alt-name
+                          (let ([alt-pr (lookup-primref 3 alt-name)])
+                            (fold-call/primref/shallow preinfo alt-pr e* #f r* ctxt ntypes oldtypes plxc)))))]))
+
       (let ()
         (define (predicate-implies-real? r) (predicate-implies? r real-pred))
         (define (predicate-implies-fixnum? r) (predicate-implies? r fixnum-pred))

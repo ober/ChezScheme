@@ -110,7 +110,10 @@
    predicate-union
    predicate-substract
    make-pred-$record/rtd
-   make-pred-$record/ref)
+   make-pred-$record/ref
+   $eq-ht-pred
+   $symbol-ht-pred
+   $hashtable-pred)
 
   (define-record-type pred-or
     (fields sin mul nor exi rec)
@@ -634,6 +637,10 @@
       [(maybe-transcoder) (cons false-rec maybe-$record-pred)]
       [(rcd sfd timeout) '(bottom . $record)] ; not opaque, sealed
       [(maybe-rcd maybe-sub-rcd maybe-sfd maybe-timeout) (cons false-rec maybe-$record-pred)]
+      [hashtable $hashtable-pred]
+      [eq-hashtable $eq-ht-pred]
+      [symbol-hashtable $symbol-ht-pred]
+      [old-hash-table (cons 'bottom $hashtable-pred)]
 
       [else (cons 'bottom true-pred)])); for all other types that exclude #f
 
@@ -1525,6 +1532,16 @@
   (define subset-of-complex-rational-pred (predicate-union subset-of-rational-pred inexact-complex-zero-pred))
 
   (define real-zero-pred (predicate-union fxzero-rec flzero-pred))
+
+  (define $eq-ht-pred
+    (make-pred-$record/rtd
+      (let () (include "hashtable-types.ss") (record-type-descriptor eq-ht))))
+  (define $symbol-ht-pred
+    (make-pred-$record/rtd
+      (let () (include "hashtable-types.ss") (record-type-descriptor symbol-ht))))
+  (define $hashtable-pred
+    (make-pred-$record/rtd
+      (let () (include "hashtable-types.ss") (record-type-descriptor hashtable))))
 
   (define maybe-symbol-pred (maybe symbol-pred))
   (define maybe-procedure-pred (maybe 'procedure))

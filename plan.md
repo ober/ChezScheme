@@ -14,10 +14,10 @@ Baseline: `07f3fd90 newhash: dispatch generic hashtable ops via sealed-record pr
 - `bench/jerboa-bench.ss`: baseline Jerboa-shaped workload bench
 - Verified: `hash.mo`, `cptypes.mo`, `5_6.mo`, `record.mo` all clean
 
-## Jerboa-side (companion changes in `~/jerboa`, staged but not committed)
+## Jerboa-side (companion changes in `~/jerboa`, landed)
 
-These pair with the Chez-side landings above and need the user's pre-commit
-Docker build before they ship:
+Landed as `b5c0471 result/runtime: seal ok/err, macro-ize ~ dispatch`.
+These pair with the Chez-side landings above:
 
 - `lib/std/result.sls` — `result-ok` / `result-err` are now `sealed` and
   `nongenerative` with stable UIDs.  With the Chez sealed-RTD work, this lets

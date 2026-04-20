@@ -14,16 +14,42 @@ Baseline: `07f3fd90 newhash: dispatch generic hashtable ops via sealed-record pr
 - `bench/jerboa-bench.ss`: baseline Jerboa-shaped workload bench
 - Verified: `hash.mo`, `cptypes.mo`, `5_6.mo`, `record.mo` all clean
 
-## Out of scope on this branch
+## Jerboa-side (companion changes in `~/jerboa`, staged but not committed)
 
-The remaining plan items require either Jerboa-side changes, user direction, or measurement data that this repo can't produce in isolation.  Deferring:
+These pair with the Chez-side landings above and need the user's pre-commit
+Docker build before they ship:
 
-- **§3.3 method-cache primitive** — needs a Jerboa profile to confirm `~` dispatch is hashtable-keyed and is a hot spot.  Without that, adding a `$method-cache-ref` primitive to Chez is speculative.
-- **§5.1 iterator fusion** — Jerboa's `for/collect` / `for/fold` are Jerboa-side macros; fusion at the Chez cp0 level would require moving or duplicating that expansion, which is invasive and risky.  Not a Chez-only change.
-- **§6.1 regex literal promotion** — Jerboa's `(re ...)` is a Jerboa macro.  The Chez side can't fold it without a Jerboa-side cp0 hook.
-- **§10.2 CI hook** — touches `.github/workflows/ci.yml`, which is security-sensitive upstream; needs explicit user sign-off before a CI job is added.
+- `lib/std/result.sls` — `result-ok` / `result-err` are now `sealed` and
+  `nongenerative` with stable UIDs.  With the Chez sealed-RTD work, this lets
+  cp0 fold `(ok? (ok x))` → `#t` and lets cptypes narrow `result?` to
+  `ok?` / `err?` in each arm of a predicate `if`.
+- `lib/jerboa/runtime.sls` — `~` is now an identifier macro that expands
+  `(~ obj 'm arg ...)` directly to `(call-method obj 'm arg ...)`,
+  eliminating one `apply` + rest-list allocation per method call.  A
+  bare `~` still evaluates to a procedure value (`~proc`) for
+  higher-order use.  The underlying `*method-tables*` is an
+  eq-hashtable, which now flows through Chez's new
+  `#3%eq-hashtable-ref` specialization.
 
-Everything tractable from Chez alone has landed.
+Verified: `make build` clean, 65/65 reader, 68/68 core, 65/65 stdlib.
+`(~ q 'norm)` confirmed to expand to `(call-method q 'norm)` with no
+`apply` in the optimized output.
+
+## Still out of scope
+
+- **§3.3 full method-cache primitive** (beyond the `~` macro-ization):
+  would need a per-call-site inline cache.  Skipping until a Jerboa
+  workload profile identifies method dispatch as a measured hot spot
+  beyond what the eq-hashtable specialization plus `~` inlining
+  already buys.
+- **§5.1 iterator fusion** — `for/collect` / `for/fold` deforestation
+  is invasive; worth a dedicated session with before/after benchmarks
+  on Jerboa workloads.
+- **§6.1 regex literal promotion** — `(re <string>)` folding to a
+  pre-compiled re-object would need the re-object to be
+  FASL-serializable; unverified.
+- **§10.2 CI perf-regression hook** — `.github/workflows/ci.yml`
+  changes need explicit user sign-off.
 
 ## Context
 

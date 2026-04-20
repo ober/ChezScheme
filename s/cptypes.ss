@@ -1251,6 +1251,8 @@ Notes:
                [(hashtable-contains?) 'eq-hashtable-contains?]
                [(hashtable-delete!) 'eq-hashtable-delete!]
                [(hashtable-update!) 'eq-hashtable-update!]
+               [(hashtable-cell) 'eq-hashtable-cell]
+               [(hashtable-ref-cell) 'eq-hashtable-ref-cell]
                [else #f])]
             [(predicate-implies? first-arg-type $symbol-ht-pred)
              (case prim-name
@@ -1259,10 +1261,13 @@ Notes:
                [(hashtable-contains?) 'symbol-hashtable-contains?]
                [(hashtable-delete!) 'symbol-hashtable-delete!]
                [(hashtable-update!) 'symbol-hashtable-update!]
+               [(hashtable-cell) 'symbol-hashtable-cell]
+               [(hashtable-ref-cell) 'symbol-hashtable-ref-cell]
                [else #f])]
             [else #f]))
         (define-specialize 2 (hashtable-ref hashtable-set! hashtable-contains?
-                              hashtable-delete! hashtable-update!)
+                              hashtable-delete! hashtable-update!
+                              hashtable-cell hashtable-ref-cell)
           [e* (and (pair? e*)
                    (let* ([r* (get-type e*)]
                           [alt-name (specialize-ht-op prim-name (car r*))])

@@ -121,6 +121,21 @@ Online versions of both books can be found at
 %-----------------------------------------------------------------------------
 \section{Functionality Changes}\label{section:functionality}
 
+\subsection{Specialized hashtable dispatch in type-recovery pass}
+
+The type-recovery pass now recognizes the sealed hashtable subtypes
+\scheme{eq-ht} and \scheme{symbol-ht} in its lattice. When it can prove
+that the first argument to \scheme{hashtable-ref}, \scheme{hashtable-set!},
+\scheme{hashtable-contains?}, \scheme{hashtable-delete!},
+\scheme{hashtable-update!}, \scheme{hashtable-cell}, or
+\scheme{hashtable-ref-cell} is an \scheme{eq-hashtable} or
+\scheme{symbol-hashtable} --- for example when the value comes directly
+from \scheme{make-eq-hashtable} or a \scheme{let} binding whose
+initializer has that type --- the generic call is rewritten at compile
+time to the corresponding subtype-specific primitive
+(\scheme{eq-hashtable-ref}, \scheme{symbol-hashtable-ref}, etc.),
+eliminating the run-time subtype dispatch.
+
 \subsection{Named Cost Center (10.4.0)}
 
 The procedure \scheme{make-cost-center} now

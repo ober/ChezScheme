@@ -2516,3 +2516,32 @@
        (let ([x (if t (random) (div-and-mod "2" m))])
          (list x x x))))
 )
+
+(mat cptypes-hashtable-specialization
+  ; When cptypes can prove the first argument of a generic hashtable
+  ; operation is an eq-hashtable, it rewrites the call to the type-specific
+  ; eq-hashtable-* primitive at level 3 (safe to skip the runtime check,
+  ; since cptypes already proved the type).  This mat guards the rewrite
+  ; against future regressions.
+  (cptypes-equivalent-expansion?
+    '(lambda (v) (hashtable-ref (make-eq-hashtable) 'k v))
+    '(lambda (v) (#3%eq-hashtable-ref (make-eq-hashtable) 'k v)))
+  (cptypes-equivalent-expansion?
+    '(lambda (v) (hashtable-set! (make-eq-hashtable) 'k v))
+    '(lambda (v) (#3%eq-hashtable-set! (make-eq-hashtable) 'k v)))
+  (cptypes-equivalent-expansion?
+    '(lambda () (hashtable-contains? (make-eq-hashtable) 'k))
+    '(lambda () (#3%eq-hashtable-contains? (make-eq-hashtable) 'k)))
+  (cptypes-equivalent-expansion?
+    '(lambda () (hashtable-delete! (make-eq-hashtable) 'k))
+    '(lambda () (#3%eq-hashtable-delete! (make-eq-hashtable) 'k)))
+  (cptypes-equivalent-expansion?
+    '(lambda (f v) (hashtable-update! (make-eq-hashtable) 'k f v))
+    '(lambda (f v) (#3%eq-hashtable-update! (make-eq-hashtable) 'k f v)))
+  (cptypes-equivalent-expansion?
+    '(lambda (v) (hashtable-cell (make-eq-hashtable) 'k v))
+    '(lambda (v) (#3%eq-hashtable-cell (make-eq-hashtable) 'k v)))
+  (cptypes-equivalent-expansion?
+    '(lambda () (hashtable-ref-cell (make-eq-hashtable) 'k))
+    '(lambda () (#3%eq-hashtable-ref-cell (make-eq-hashtable) 'k)))
+)

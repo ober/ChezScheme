@@ -7,9 +7,23 @@ Baseline: `07f3fd90 newhash: dispatch generic hashtable ops via sealed-record pr
 
 - `07f3fd90` newhash: core hashtable ops dispatch via sealed-RTD predicates
 - `1c7da443` newhash: sealed-RTD dispatch extended to bulk / introspection ops
-- `0cba64de` cptypes: statically specialize generic hashtable ops to `#3%eq-hashtable-*` / `#3%symbol-hashtable-*` when first arg's subtype is known
+- `0cba64de` cptypes: statically specialize the seven hot R6RS hashtable ops (`ref/set!/contains?/delete!/update!`) to `#3%eq-hashtable-*` / `#3%symbol-hashtable-*` when first arg's subtype is known
+- `c83b6fb1` cptypes: same specialization for `hashtable-cell` and `hashtable-ref-cell`
+- `9e389cc7` plan: Phase 4 landed record
+- `2df03b20` mats/cptypes.ms: regression-guard mat (`cptypes-hashtable-specialization`) asserting each of the seven ops rewrites at compile time
 - `bench/jerboa-bench.ss`: baseline Jerboa-shaped workload bench
-- Verified: `hash.mo`, `cptypes.mo`, `5_6.mo`, `record.mo` all clean after all three landed commits
+- Verified: `hash.mo`, `cptypes.mo`, `5_6.mo`, `record.mo` all clean
+
+## Out of scope on this branch
+
+The remaining plan items require either Jerboa-side changes, user direction, or measurement data that this repo can't produce in isolation.  Deferring:
+
+- **§3.3 method-cache primitive** — needs a Jerboa profile to confirm `~` dispatch is hashtable-keyed and is a hot spot.  Without that, adding a `$method-cache-ref` primitive to Chez is speculative.
+- **§5.1 iterator fusion** — Jerboa's `for/collect` / `for/fold` are Jerboa-side macros; fusion at the Chez cp0 level would require moving or duplicating that expansion, which is invasive and risky.  Not a Chez-only change.
+- **§6.1 regex literal promotion** — Jerboa's `(re ...)` is a Jerboa macro.  The Chez side can't fold it without a Jerboa-side cp0 hook.
+- **§10.2 CI hook** — touches `.github/workflows/ci.yml`, which is security-sensitive upstream; needs explicit user sign-off before a CI job is added.
+
+Everything tractable from Chez alone has landed.
 
 ## Context
 

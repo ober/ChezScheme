@@ -62,6 +62,29 @@ Verified: `make build` clean, 65/65 reader, 68/68 core, 65/65 stdlib.
   require cptypes to propagate the sealed RTD of a top-level
   `(define ds (make-X ...))` to downstream `(X-field ds)` uses — a
   larger piece of type-flow work, deferred.
+- **Phase 18 — static kwarg specialization** — the Phase 6 single-pass
+  extractor (jerboa `19e5a5b`) already handles the common case well:
+  bench `bench-kwargs.ss` (jerboa `60704fe`) shows kwarg functions with
+  no kwargs passed are ≤8 ns/call (default path short-circuits on
+  `(null? %kw-rest)`); calls with all kwargs passed scale as ~8-9 ns
+  per kwarg × k kwargs. A static specialization — rewriting callers
+  with literal `'kw: val` pairs to a direct positional call to a
+  hidden `%name-impl` — would cut full-kwarg calls from ~60 ns (k=6)
+  to ~7 ns. Design outline:
+  (1) `def` with kwargs emits three forms: `%name-impl` (positional-
+      only impl), `%name-generic` (current rest-arg named-loop wrapping
+      impl), and `define-syntax name` (identifier macro).
+  (2) The identifier macro recognizes `(name r... 'kw: v ...)` calls
+      with all literal quoted kwargs, remaps them to declaration-order
+      positional args (filling in defaults), and emits
+      `(%name-impl r... v...)`.
+  (3) Any other call (including bare `name` as a value) defers to
+      `%name-generic`.
+  Not implemented this round: the change is invasive to `def`
+  (programmatic `define-syntax` generation from within a macro that
+  already handles typed params, return types, and optionals), and
+  kwargs-in-hot-loops is an uncommon pattern. Ready for a dedicated
+  session with a specific workload to validate.
 - **Phase 17 — per-callsite PIC for `~`** — architecturally blocked
   at this layer. A PIC wants per-callsite mutable state (a cache slot
   seeded on first dispatch and read by name + RTD on subsequent ones).

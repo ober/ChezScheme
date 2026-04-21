@@ -397,8 +397,44 @@ extension additive — a new `~` clause can emit the PIC form, and the
 existing `call-method-N` entries stay as fallback for indirect use
 (e.g. `(map (lambda (x) (~ x 'area)) …)` through `~proc`).
 
-Companion commit lives in the Jerboa repo:
-`015d3aa` (`lib/jerboa/runtime.sls`).
+### Phase 12 deeper — inline own-RTD lookup at the `~` callsite
+
+The arity-specialized `call-method-N` entries still imposed a
+cross-library procedure call frame on every `~` callsite, with
+`find-method` inside that call doing the own-RTD hashtable lookup as
+its first loop iteration.
+
+The refinement: expand `~` directly to the own-RTD fast path inline
+at the callsite, falling through to `call-method-N` only on miss
+(where parent-walk is required anyway). Each callsite compiles to
+two inlined `hashtable-ref` primitives + a direct call of the method
+procedure. Only cache misses (method on parent RTD, or unbound) pay
+the cross-library call.
+
+Tradeoff: callsite code size grows — every `~` becomes ~6 let
+bindings + 2 primitive lookups + a branch. Acceptable given `~` is
+primarily used in hot dispatch paths.
+
+Micro-bench (optimize-level 3, 2M iters, `point` struct):
+
+| arity | baseline | macro-inlined | Δ    |
+|-------|---------:|--------------:|------|
+| 0     | 49.6 ns  | 44.6 ns       | −10% |
+| 1     | 43.1 ns  | 35.4 ns       | −18% |
+| 2     | 45.9 ns  | 38.5 ns       | −16% |
+| 3     | 63.2 ns  | 56.0 ns       | −11% |
+| 4     | 64.4 ns  | 58.1 ns       | −10% |
+
+Arity-1/2 (the most common real-world case — `{method obj arg}`) see
+the largest win. The `call-method-N` procedures remain as a slow-path
+fallback and as the entry point for the `~proc` form used in
+higher-order contexts. `find-method` still handles parent walk.
+
+All existing suites still pass: test-core 68, test-multi 24,
+test-devirt 15, test-better 202.
+
+Companion commits in the Jerboa repo:
+`015d3aa` (arity-specialization) + `a017126` (macro-inline expansion).
 
 ## Phase 13 — Jerboa: fuse `in-hash-keys`/`in-hash-values`
 
@@ -432,6 +468,33 @@ Micro-bench (optimize-level 3, 500-key table, 5000 iters):
 
 Companion commit lives in the Jerboa repo:
 `3761b4a` (`lib/std/iter.sls`).
+
+### Phase 13 deeper — attempt for/for-fold hash fusion via helper
+
+Tried to extend hash-iter fusion to `for` and `for/fold` by adding a
+`%ht-values-vec` helper that extracts the values vector from
+`hashtable-entries` once per iterator rather than paying
+`call-with-values` on every iteration of the enclosing loop.
+
+Re-measured at optimize-level 3 over a 500-key table (5000 iters):
+
+|                   | fused vector-indexed | unfused list    |
+|-------------------|---------------------:|----------------:|
+| `for` in-hash-keys| 12.8 µs              | 6.3 µs          |
+| `for/fold` values | 8.9 µs               | 7.1 µs          |
+| `for/collect` keys| 6.8 µs               | 8.5 µs          |
+
+Conclusion: `for/collect` fusion wins (~20% faster), matching the
+landed scope.  `for` loses 2x — Chez's native `for-each` primitive on
+a list beats a hand-rolled `fx<` + `vector-ref` index loop.
+`for/fold` loses ~25% — the helper avoids *per-iter*
+`call-with-values`, but the procedure-call frame the helper itself
+introduces (and the vector-indexed loop vs tight `car`/`cdr` on a
+list) still lose.  `for` and `for/fold` stay on the unfused path.
+
+The `%ht-values-vec` helper is retained and used by for/collect's
+in-hash-values fusion (parity with the prior inline `let-values`
+form, slightly cleaner).  Landed as part of commit `a017126`.
 
 ## Phase 14 — Jerboa: decision-tree match compiler
 
@@ -468,10 +531,48 @@ Micro-bench (optimize-level 3, op-kind with 8 tagged clauses):
 
 `tests/test-match2.ss`: 62/62 pass.
 
-A fuller decision-tree compiler (sharing only prefix checks across
-mixed-length or mixed-shape clauses, redundancy/exhaustiveness
-analysis) would be a larger rewrite with narrower upside beyond this
-transform. Deferred.
+### Phase 14 deeper — factor list-shape check across mixed-length runs
 
-Companion commit lives in the Jerboa repo:
-`2f1c79d` (`lib/std/match2.sls`).
+The original Phase 14 only fused runs of clauses sharing the SAME
+list length.  Real-world parsers / interpreters often have mixed
+arities (`(list 'num n)`, `(list 'add a b)`, `(list 'if c t e)`), so
+a run broke up after every length change and each clause fell back
+to the generic spine-walking `compile-pat`.
+
+The refinement:
+
+- `split-tagged-run` now collects any leading run of distinct-tag
+  tagged-list clauses regardless of length.
+- `compile-tagged-run` detects whether all clauses share a length.
+  Uniform-length runs emit the same code as before (factored length
+  check + cond).  Mixed-length runs factor `pair?` + head extraction
+  only; each arm checks `(and (list? val) (= (length val) N))` for
+  its own N.
+- The dispatcher guard now requires only distinct head tags (not
+  equal length) to consider fusion.
+
+Uniform-length case: identical emitted code, identical measurements.
+
+Mixed-length micro-bench (optimize-level 3, parser-style match with
+10 distinct-tag clauses of lengths 2/3/4 + wildcard):
+
+|                         | baseline (no fusion) | phase-14 deeper | speedup |
+|-------------------------|---------------------:|----------------:|--------:|
+| 11 mixed inputs         | 345 ns/iter          | 163 ns/iter     | 2.1x    |
+| worst-case last-tag hit | 46 ns/iter           | 22 ns/iter      | 2.1x    |
+| best-case first-tag hit | 16 ns/iter           | 17 ns/iter      | parity  |
+| miss (falls through)    | 50 ns/iter           | 14 ns/iter      | 3.6x    |
+
+The miss case improves most — instead of 10 failed per-clause
+spine-walks, it's one `pair?` + one `car` + 10 `eq?` compares in a
+tight cond before hitting the wildcard.
+
+All 62 `tests/test-match2.ss` cases still pass.
+
+A fuller decision-tree compiler (sharing only prefix checks across
+mixed-shape clauses, redundancy / exhaustiveness analysis) would be
+a larger rewrite with narrower upside beyond this transform.
+Deferred.
+
+Companion commits in the Jerboa repo:
+`2f1c79d` (same-length fusion) + `a017126` (mixed-length runs).

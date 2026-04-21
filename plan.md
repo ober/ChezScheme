@@ -402,13 +402,36 @@ Companion commit lives in the Jerboa repo:
 
 ## Phase 13 — Jerboa: fuse `in-hash-keys`/`in-hash-values`
 
-Phase 5 already fuses `in-range`/`in-vector`/`in-string`/`in-list`.
-Extend the same macro dispatch to `(in-hash-keys ht)` and
-`(in-hash-values ht)` by iterating via `hashtable-keys`/`-entries`
-directly into the loop body instead of materializing the key/value
-list first.
+**Status: landed, for/collect only (scope trimmed from the plan).**
 
-Mechanical extension of existing Phase 5 machinery.
+Phase 5 already fuses `in-range`/`in-vector`/`in-string`/`in-list`.
+The original plan was a mechanical extension to `(in-hash-keys ht)`
+and `(in-hash-values ht)` across `for`, `for/collect`, and
+`for/fold`. Benchmark measurements on the target host revealed that
+only `for/collect` wins — the `for` and `for/fold` fallbacks are
+already fast because Chez's `for-each` primitive and a tight
+`car`/`cdr` recursion over the materialized list beat a hand-rolled
+indexed vector loop + the `let-values`/`call-with-values` wrapper
+that `hashtable-entries` forces.
+
+Landed fusion (for/collect):
+- `(for/collect ((k (in-hash-keys ht))) body)` expands to
+  `(hashtable-keys ht)` + `vector-ref` index loop + `cons` into acc.
+- `(for/collect ((v (in-hash-values ht))) body)` uses
+  `hashtable-entries` (the keys vector is named and discarded).
+- Skips the intermediate `(vector->list ...)` allocation that
+  `hash-keys`/`hash-values` would produce through the fallback.
+
+`for` and `for/fold` were intentionally left on the unfused path
+(`for-each` + list) because fusing them regressed 15–40% on the
+target host.
+
+Micro-bench (optimize-level 3, 500-key table, 5000 iters):
+- for/collect fused:   6647 ns/iter
+- for/collect unfused: 8296 ns/iter  (~20% faster fused)
+
+Companion commit lives in the Jerboa repo:
+`3761b4a` (`lib/std/iter.sls`).
 
 ## Phase 14 — Jerboa: decision-tree match compiler
 

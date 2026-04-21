@@ -435,10 +435,43 @@ Companion commit lives in the Jerboa repo:
 
 ## Phase 14 — Jerboa: decision-tree match compiler
 
-Current `match2` emits a linear chain of clause tests. Runs of
-patterns sharing a prefix (same tag, same list length) each re-check
-the whole prefix. Replace with a decision-tree compiler that factors
-common prefixes.
+**Status: landed, tagged-list-run fusion (narrow scope from the plan).**
 
-Biggest win on large `match` forms (parsers, evaluators). Least
-urgent of the Round 2 set.
+`match2` already fuses runs of `(: Type)` colon-clauses into a
+single `record-rtd` + `cond` dispatch (that was step 22 pre-work).
+The remaining high-impact pattern in parsers/evaluators is runs of
+`(list 'TAG p ...)` clauses. Previously each such clause re-checked
+`(list? v)` + `(= (length v) N)` and re-ran `equal?` on the head
+tag for every earlier clause that failed.
+
+Landed transformation: a maximal run of tagged-list clauses that
+share the same length, have distinct literal-symbol head tags, and
+carry no `(where)` guard compiles to
+
+    (if (and (list? val) (= (length val) N))
+        (let ([hd (list-ref val 0)])
+          (cond
+            [(eq? hd 'TAG1) <rest-of-clause-1>]
+            [(eq? hd 'TAG2) <rest-of-clause-2>]
+            ...
+            [else <fallthrough>]))
+        <fallthrough>)
+
+Clauses that would change pattern semantics (duplicate tags,
+different lengths, guards) end the run — only safe, order-preserving
+fusion happens inside a contiguous block.
+
+Micro-bench (optimize-level 3, op-kind with 8 tagged clauses):
+- 10 mixed inputs:        180.7 → 84.6 ns/iter   (2.1x)
+- Worst-case last-tag:     32.3 → 10.3 ns/iter   (3.1x)
+- Best-case first-tag:      8.0 →  8.7 ns/iter   (parity, no new cost)
+
+`tests/test-match2.ss`: 62/62 pass.
+
+A fuller decision-tree compiler (sharing only prefix checks across
+mixed-length or mixed-shape clauses, redundancy/exhaustiveness
+analysis) would be a larger rewrite with narrower upside beyond this
+transform. Deferred.
+
+Companion commit lives in the Jerboa repo:
+`2f1c79d` (`lib/std/match2.sls`).

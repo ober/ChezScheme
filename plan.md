@@ -298,10 +298,45 @@ No code changes to `s/cp0.ss` or `s/cpprim.ss` needed.
 
 ## Phase 10 — Chez: cptypes specialize bytevector/string ops
 
-Same pattern as `0cba64de` (hashtables). Once cptypes proves a value
-is a bytevector/string, rewrite `bytevector-u8-ref`/`string-ref` etc.
-to their `#3%` level-3 variants. Add mat in `mats/cptypes.ms`
-paralleling `cptypes-hashtable-specialization`.
+**Investigated: the win here is narrower than the hashtable case.**
+Chez's generic `fold-primref/try-unsafe` (s/cptypes.ss:1997) already
+promotes any primitive flagged `safeongoodargs` in `s/primdata.ss`
+when cptypes has proved every argument's type matches its declared
+predicate. This covers the bytevector/string ops whose signatures
+don't include a runtime range:
+
+  `string-length`, `bytevector-length`, `string-copy`,
+  `bytevector-copy`, `string->list`, `bytevector->u8-list`,
+  `string-append`, `string->symbol`
+
+Each of these already rewrites to `#3%`-prefixed at compile time when
+the source arg's type is proved (e.g. the result of
+`make-string`/`make-bytevector`).
+
+The remaining ops — `bytevector-u8-ref`, `string-ref`,
+`bytevector-u8-set!`, `string-set!`, `bytevector-u16-native-ref`, …
+— are not flagged `safeongoodargs` because their signatures include
+`sub-index`: the level-2 check is a fused type-plus-bounds check, and
+the level-3 variant elides both. Promoting them when only the type is
+proved (i.e., without an in-range index) would introduce memory
+corruption. Truly specializing them requires compile-time bounds
+analysis — the index must be proved in `[0, (bytevector-length bv))` —
+which cptypes does not yet do.
+
+**Deliverable:** regression mat
+`cptypes-bytevector-string-safeongoodargs-promotion` in
+`mats/cptypes.ms` pinning the eight ops listed above. Also retains
+the out-of-scope boundary: we do not specialize indexed ops in this
+phase.
+
+No code changes to `s/cptypes.ss`, `s/cpprim.ss`, or `s/primdata.ss`
+needed.
+
+**Follow-on (deferred):** compile-time bounds analysis for
+bytevector/string indexed ops. A clean separation would be a new
+primitive flag (say `safeongoodtypes`) and matching per-primitive
+specializer that keeps the bounds check but drops the type check when
+the first arg's type is proved. Tracked separately from this phase.
 
 ## Phase 11 — Chez: type narrowing through user predicates
 

@@ -2589,3 +2589,43 @@
        (define-record-type pt (nongenerative pt-uid) (sealed #t) (fields x))
        (lambda (v) (#3%$sealed-record? v (record-type-descriptor pt)))))
 )
+
+(mat cptypes-bytevector-string-safeongoodargs-promotion
+  ; Primitives flagged `safeongoodargs` in primdata.ss get promoted
+  ; to their level-3 variant by fold-primref/try-unsafe in cptypes.ss
+  ; whenever every argument's static type matches its declared
+  ; predicate.  This mat pins the promotion for the bytevector/string
+  ; ops Jerboa hits hardest, so a regression in the `safeongoodargs`
+  ; path (or in the corresponding flag on a primitive) doesn't quietly
+  ; re-introduce a type check per call.
+  ;
+  ; Note: indexed ops (bytevector-u8-ref, string-ref, etc.) are NOT
+  ; flagged `safeongoodargs` because promoting them to level 3 elides
+  ; both the type check and the bounds check.  Promoting them would
+  ; require compile-time bounds analysis, which cptypes does not yet
+  ; do; that work is deliberately out of scope for this mat.
+  (cptypes-equivalent-expansion?
+    '(lambda () (string-length (make-string 10 #\a)))
+    '(lambda () (#3%string-length (make-string 10 #\a))))
+  (cptypes-equivalent-expansion?
+    '(lambda () (bytevector-length (make-bytevector 10 0)))
+    '(lambda () (#3%bytevector-length (make-bytevector 10 0))))
+  (cptypes-equivalent-expansion?
+    '(lambda () (string-copy (make-string 10 #\a)))
+    '(lambda () (#3%string-copy (make-string 10 #\a))))
+  (cptypes-equivalent-expansion?
+    '(lambda () (string->list (make-string 10 #\a)))
+    '(lambda () (#3%string->list (make-string 10 #\a))))
+  (cptypes-equivalent-expansion?
+    '(lambda () (bytevector-copy (make-bytevector 10 0)))
+    '(lambda () (#3%bytevector-copy (make-bytevector 10 0))))
+  (cptypes-equivalent-expansion?
+    '(lambda () (bytevector->u8-list (make-bytevector 10 0)))
+    '(lambda () (#3%bytevector->u8-list (make-bytevector 10 0))))
+  (cptypes-equivalent-expansion?
+    '(lambda () (string-append (make-string 5 #\a) (make-string 5 #\b)))
+    '(lambda () (#3%string-append (make-string 5 #\a) (make-string 5 #\b))))
+  (cptypes-equivalent-expansion?
+    '(lambda () (string->symbol (make-string 10 #\a)))
+    '(lambda () (#3%string->symbol (make-string 10 #\a))))
+)

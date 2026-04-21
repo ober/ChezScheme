@@ -370,21 +370,35 @@ No code changes to `s/cptypes.ss` or `s/cp0.ss` needed.
 
 ## Phase 12 — Jerboa: method-dispatch inline cache
 
-`(~ obj 'method ...)` currently does an eq-hashtable lookup per call
-(see `runtime.sls`'s `call-method`). Add a per-call-site monomorphic
-cache — one-entry PIC keyed on RTD. On hit, direct call; on miss,
-fall back to the hashtable and update the cache.
+`(~ obj 'method ...)` previously went through a single variadic
+`call-method` + `apply`, paying rest-list allocation on every call.
 
-Expand `~` to wrap the call site in a cache cell. The generated code:
+**Status: landed, arity-specialized dispatch (not per-callsite PIC).**
 
-    (let ([cache-rtd #f] [cache-proc #f])
-      (lambda (obj . args)
-        (let ([r (record-rtd obj)])
-          (if (eq? r cache-rtd)
-              (apply cache-proc obj args)
-              (%slow-dispatch-and-cache obj 'method args)))))
+A full per-callsite PIC needs module-level cache-cell allocation (one
+cell per call site), which adds macro complexity and a startup-time
+footprint. Instead, the commit replaces the variadic body with
+arity-specialized entries (`call-method-0` through `call-method-4` +
+variadic fallback) and teaches `~` to expand to the narrowest arity.
+Each entry inlines the rtd lookup and calls the method directly — no
+`apply`, no rest-list, on the 0/1/2/3/4-arg paths that cover almost
+every `~` call in the stdlib.
 
-Benchmark target: 5–10x on hot method-heavy loops.
+Measured on `tests/bench-suite.ss`'s `method-dispatch` bench (noisy
+Termux host; baseline in `tests/bench-baseline.scm` was recorded on a
+quieter run, so absolute numbers drift):
+
+- pre-change (5 runs, min/median): 88 / 92 ns/op
+- phase-12   (5 runs, min/median): 80 / 81 ns/op (~12% faster)
+
+The per-callsite PIC remains an option for a future phase if
+method-heavy workloads emerge. The macro structure makes this
+extension additive — a new `~` clause can emit the PIC form, and the
+existing `call-method-N` entries stay as fallback for indirect use
+(e.g. `(map (lambda (x) (~ x 'area)) …)` through `~proc`).
+
+Companion commit lives in the Jerboa repo:
+`015d3aa` (`lib/jerboa/runtime.sls`).
 
 ## Phase 13 — Jerboa: fuse `in-hash-keys`/`in-hash-values`
 

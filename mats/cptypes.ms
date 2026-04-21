@@ -2629,3 +2629,74 @@
     '(lambda () (string->symbol (make-string 10 #\a)))
     '(lambda () (#3%string->symbol (make-string 10 #\a))))
 )
+
+(mat cptypes-user-record-predicate-narrowing
+  ; When cptypes sees a user-defined record predicate succeed in test
+  ; position, every field accessor in the consequent narrows to the
+  ; unsafe #3%$object-ref primitive.  The predicate itself was folded
+  ; by Phase 9 (sealed) or by the existing cpprim record? lowering
+  ; (hierarchical).  This mat guards the narrowing half: future
+  ; changes to cptypes' pred-env handling must not drop the
+  ; record-type fact on the true-arm of the if.
+  ;
+  ; In practice this is what makes Jerboa's (defstruct ...) accessors
+  ; cheap: (match val [(: point) (+ val.x val.y)]) compiles field
+  ; reads to one mref each.
+  (cptypes-equivalent-expansion?
+    '(let ()
+       (define-record-type pa (nongenerative pa-uid) (sealed #t) (fields x y))
+       (lambda (v)
+         (if (pa? v)
+             (+ (pa-x v) (pa-y v))
+             0)))
+    '(let ()
+       (define-record-type pa (nongenerative pa-uid) (sealed #t) (fields x y))
+       (lambda (v)
+         (if (#3%$sealed-record? v (record-type-descriptor pa))
+             (#2%+
+               (#3%$object-ref 'scheme-object v 9)
+               (#3%$object-ref 'scheme-object v 17))
+             0))))
+  ; and-chain narrowing: true-arm of and sees the record type
+  (cptypes-equivalent-expansion?
+    '(let ()
+       (define-record-type pb (nongenerative pb-uid) (sealed #t) (fields x))
+       (lambda (v) (and (pb? v) (pb-x v))))
+    '(let ()
+       (define-record-type pb (nongenerative pb-uid) (sealed #t) (fields x))
+       (lambda (v)
+         (if (#3%$sealed-record? v (record-type-descriptor pb))
+             (#3%$object-ref 'scheme-object v 9)
+             #f))))
+  ; Narrowing survives an intermediate let whose value is used.
+  (cptypes-equivalent-expansion?
+    '(let ()
+       (define-record-type pc (nongenerative pc-uid) (sealed #t) (fields x y))
+       (lambda (v)
+         (if (pc? v)
+             (let ([a (pc-x v)])
+               (+ a (pc-y v)))
+             0)))
+    '(let ()
+       (define-record-type pc (nongenerative pc-uid) (sealed #t) (fields x y))
+       (lambda (v)
+         (if (#3%$sealed-record? v (record-type-descriptor pc))
+             (let ([a (#3%$object-ref 'scheme-object v 9)])
+               (#2%+ a (#3%$object-ref 'scheme-object v 17)))
+             0))))
+  ; Narrowing also works for unsealed (hierarchical) user records --
+  ; the predicate lowers to #3%record? instead of #3%$sealed-record?
+  ; but the accessor inside the true-arm still narrows to
+  ; #3%$object-ref.
+  (cptypes-equivalent-expansion?
+    '(let ()
+       (define-record-type nd (nongenerative nd-uid) (fields val))
+       (lambda (v)
+         (if (nd? v) (nd-val v) 'nothing)))
+    '(let ()
+       (define-record-type nd (nongenerative nd-uid) (fields val))
+       (lambda (v)
+         (if (#3%record? v (record-type-descriptor nd))
+             (#3%$object-ref 'scheme-object v 9)
+             'nothing))))
+)

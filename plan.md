@@ -340,13 +340,33 @@ the first arg's type is proved. Tracked separately from this phase.
 
 ## Phase 11 — Chez: type narrowing through user predicates
 
-`(and (foo? x) (bar x))` should let `bar` see `x:foo` inside the
-`and`. Today cptypes narrows through a handful of built-in predicates
-(number?, pair?, etc.) — extend to any `record-predicate` derived from
-a sealed+nongenerative RTD so the Phase 1 structs benefit.
+**Investigated: cptypes already narrows through every user record
+predicate.** Probed at `tmp/phase11-probe{,2}.ss`:
 
-Depends on Phase 9 (the fold has to land first so cptypes sees the
-primitive operation).
+  - `(if (pa? v) (+ (pa-x v) (pa-y v)) 0)` → on the true-arm, each
+    `(pa-x v)` / `(pa-y v)` compiles to a direct
+    `#3%$object-ref 'scheme-object v <offset>`. The safe record-type
+    check + oops fallback is stripped.
+  - `(and (pb? v) (pb-x v))` — same narrowing; the `and`'s true-arm
+    sees the record-type fact.
+  - Narrowing survives an intermediate `(let ([a (pc-x v)]) (+ a
+    (pc-y v)))` — both field reads become unsafe.
+  - Works for hierarchical (unsealed) user records too: the predicate
+    lowers to `#3%record?` instead of `#3%$sealed-record?`, but the
+    accessor still narrows to `#3%$object-ref`.
+
+The narrowing is done by cptypes' existing pred-env mechanism plus
+the record-accessor inline rule in `s/cp0.ss` — no dedicated code for
+"user" vs "built-in" predicates.
+
+**Deliverable:** regression mat
+`cptypes-user-record-predicate-narrowing` in `mats/cptypes.ms`
+pinning four shapes: if/and/let-intermediate/hierarchical. A
+regression here would un-cheapen every `(defstruct ...)` accessor
+guarded by its predicate — the common pattern emitted by Jerboa's
+`match` and `using` forms.
+
+No code changes to `s/cptypes.ss` or `s/cp0.ss` needed.
 
 ## Phase 12 — Jerboa: method-dispatch inline cache
 

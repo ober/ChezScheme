@@ -62,6 +62,28 @@ Verified: `make build` clean, 65/65 reader, 68/68 core, 65/65 stdlib.
   require cptypes to propagate the sealed RTD of a top-level
   `(define ds (make-X ...))` to downstream `(X-field ds)` uses — a
   larger piece of type-flow work, deferred.
+- **Phase 17 — per-callsite PIC for `~`** — architecturally blocked
+  at this layer. A PIC wants per-callsite mutable state (a cache slot
+  seeded on first dispatch and read by name + RTD on subsequent ones).
+  Inside a macro expansion in expression context, standard Scheme
+  offers no way to allocate a persistent top-level slot tied to the
+  syntactic callsite — `define` inside a body is a let-binding that
+  re-initialises each entry. Viable but rejected alternatives:
+  (a) a single shared module-level cache — thrashes across sites and
+  races on writes in threaded Chez;
+  (b) a global `*method-caches*` eq-hashtable keyed by `(rtd . name)`
+  — replaces two hashtable-refs with one, no net win given Chez's
+  current eq-hashtable cost;
+  (c) user-declared cache boxes passed explicitly to `~` — invasive
+  to user code.
+  Jerboa-side bench `bench-method-dispatch.ss` (landed as `2dfcb47`)
+  fixes the baseline: monomorphic `(~ c 'inc)` runs at 30.5 ns/call vs
+  5.9 ns for a direct procedure call (tarm64le, o=3). The Phase 12
+  inline macro already removed the Phase-0 procedure-call frame; the
+  remaining 24 ns is two `#3%eq-hashtable-ref` calls plus the
+  `record-rtd` call and the `if/and`, which is close to the floor
+  without a host-language extension (e.g. a Chez `$pic-dispatch`
+  primitive that owns the cache box).
 
 ## Context
 

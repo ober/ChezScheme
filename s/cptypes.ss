@@ -1242,7 +1242,7 @@ Notes:
                                   #f)]))])
 
       (let ()
-        (define (specialize-ht-op prim-name first-arg-type)
+        (define (specialize-ht-op prim-name first-arg-type argc)
           (cond
             [(predicate-implies? first-arg-type $eq-ht-pred)
              (case prim-name
@@ -1253,6 +1253,11 @@ Notes:
                [(hashtable-update!) 'eq-hashtable-update!]
                [(hashtable-cell) 'eq-hashtable-cell]
                [(hashtable-ref-cell) 'eq-hashtable-ref-cell]
+               ;; hashtable-clear! and hashtable-copy are case-lambda
+               ;; with a 1-arg and a 2-arg signature; the sealed eq
+               ;; variants take 2 args, so specialize only that form.
+               [(hashtable-clear!) (and (fx= argc 2) '$eq-hashtable-clear!)]
+               [(hashtable-copy)   (and (fx= argc 2) '$eq-hashtable-copy)]
                [else #f])]
             [(predicate-implies? first-arg-type $symbol-ht-pred)
              (case prim-name
@@ -1267,10 +1272,11 @@ Notes:
             [else #f]))
         (define-specialize 2 (hashtable-ref hashtable-set! hashtable-contains?
                               hashtable-delete! hashtable-update!
-                              hashtable-cell hashtable-ref-cell)
+                              hashtable-cell hashtable-ref-cell
+                              hashtable-clear! hashtable-copy)
           [e* (and (pair? e*)
                    (let* ([r* (get-type e*)]
-                          [alt-name (specialize-ht-op prim-name (car r*))])
+                          [alt-name (specialize-ht-op prim-name (car r*) (length e*))])
                      (and alt-name
                           (let ([alt-pr (lookup-primref 3 alt-name)])
                             (fold-call/primref/shallow preinfo alt-pr e* #f r* ctxt ntypes oldtypes plxc)))))]))

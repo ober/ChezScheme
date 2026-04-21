@@ -136,6 +136,14 @@ time to the corresponding subtype-specific primitive
 (\scheme{eq-hashtable-ref}, \scheme{symbol-hashtable-ref}, etc.),
 eliminating the run-time subtype dispatch.
 
+The 2-argument forms of \scheme{hashtable-clear!} and
+\scheme{hashtable-copy} are also specialized in the same pass: when the
+first argument is a known \scheme{eq-hashtable} they route to the
+sealed \scheme{\$eq-hashtable-clear!} and \scheme{\$eq-hashtable-copy}
+system primitives. The 1-argument forms are unaffected, since the
+sealed variants require the minlen / mutable flag to be supplied
+explicitly.
+
 \subsection{Named Cost Center (10.4.0)}
 
 The procedure \scheme{make-cost-center} now

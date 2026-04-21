@@ -2544,6 +2544,15 @@
   (cptypes-equivalent-expansion?
     '(lambda () (hashtable-ref-cell (make-eq-hashtable) 'k))
     '(lambda () (#3%eq-hashtable-ref-cell (make-eq-hashtable) 'k)))
+  ; 2-arg hashtable-clear! and hashtable-copy route to the sealed
+  ; $eq-hashtable-* variants; the 1-arg forms keep the generic path
+  ; since the sealed primitives are strictly 2-arg.
+  (cptypes-equivalent-expansion?
+    '(lambda (n) (hashtable-clear! (make-eq-hashtable) n))
+    '(lambda (n) (#3%$eq-hashtable-clear! (make-eq-hashtable) n)))
+  (cptypes-equivalent-expansion?
+    '(lambda (m) (hashtable-copy (make-eq-hashtable) m))
+    '(lambda (m) (#3%$eq-hashtable-copy (make-eq-hashtable) m)))
 )
 
 (mat cptypes-sealed-record-predicate-fold

@@ -527,8 +527,8 @@
   (hashtable-delete! [sig [(hashtable ptr) -> (void)]] [flags true cptypes2])
   (hashtable-contains? [sig [(hashtable ptr) -> (boolean)]] [flags discard cptypes2])
   (hashtable-update! [sig [(hashtable ptr procedure ptr) -> (void)]] [flags cptypes2])
-  (hashtable-copy [sig [(hashtable) (hashtable ptr) -> (hashtable)]] [flags alloc])
-  (hashtable-clear! [sig [(hashtable) (hashtable sub-uint) -> (void)]] [flags true])
+  (hashtable-copy [sig [(hashtable) (hashtable ptr) -> (hashtable)]] [flags alloc cptypes2])
+  (hashtable-clear! [sig [(hashtable) (hashtable sub-uint) -> (void)]] [flags true cptypes2])
   ((r6rs: hashtable-keys) [sig [(hashtable) -> (vector)]] [flags alloc])             ; no size argument
   ((r6rs: hashtable-entries) [sig [(hashtable) -> (vector vector)]] [flags discard]) ; no size argument
   (hashtable-equivalence-function [sig [(hashtable) -> (ptr)]] [flags])

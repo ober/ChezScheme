@@ -51,6 +51,17 @@ Verified: `make build` clean, 65/65 reader, 68/68 core, 65/65 stdlib.
   FASL-serializable; unverified.
 - **§10.2 CI perf-regression hook** — `.github/workflows/ci.yml`
   changes need explicit user sign-off.
+- **Phase 16 — defstruct accessor inlining** — hypothesis was that
+  Jerboa's `(define acc iacc)` alias in `defstruct` expansion blocked
+  cp0 from folding accessors. Jerboa-side bench `bench-defstruct.ss`
+  (landed as `af328fc`) shows the alias is not a bottleneck: defstruct
+  matches native `define-record-type` within noise (152 vs 153 ms over
+  40M calls at o=3). The remaining gap (40M calls in 150 ms vs 27 ms
+  for `#3%$object-ref`) is the per-call procedure-call cost Chez emits
+  when the accessor is not folded at the site. Closing the gap would
+  require cptypes to propagate the sealed RTD of a top-level
+  `(define ds (make-X ...))` to downstream `(X-field ds)` uses — a
+  larger piece of type-flow work, deferred.
 
 ## Context
 

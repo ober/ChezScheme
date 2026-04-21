@@ -236,3 +236,117 @@ Each phase ships as an independent commit (or small series) with its own benchma
 - Changing FASL format. Out of scope and cross-cuts boot files.
 - New syntax in Chez. All Jerboa features live in Jerboa; Chez stays minimal.
 - Touching sibling repos (`jerboa-emacs`, `jerboa-mcp`, etc.). Per `CLAUDE.md`, hands off.
+
+---
+
+# Round 2 — follow-on work after Phases 1–7 landed in Jerboa
+
+Phases 1–7 in Jerboa (`~/jerboa`, commits `b5c0471` … `8dc2d71`) landed
+the Jerboa-side user-visible wins: sealed structs, match RTD-dispatch,
+str literal folding, regex memoization, iterator fusion, single-pass
+kwargs, and prelude WPO. The remaining wins are mostly Chez-side
+(primitive folds that make the Jerboa work propagate through the
+compiler) plus a few Jerboa-side items that were left out the first
+time.
+
+Ordering rationale: land the benchmark harness first so every later
+commit can carry a concrete delta. Then the Chez sealed-RTD predicate
+fold, since that's the single largest multiplier on the Jerboa sealed
+structs already in place.
+
+## Phase 8 — Jerboa bench harness + regression gate
+
+Add `~/jerboa/tests/bench-suite.ss` running the micro-benchmarks used
+during Phases 1–7 (sealed-struct dispatch, match, str, regex memoize,
+for/collect fusion, kwargs, hashtable ops, method dispatch). Each
+bench runs N iterations, reports median ns/op. A companion script
+diffs against a committed baseline JSON and exits nonzero on > 10%
+regression.
+
+Without this, the Phases 1–7 wins silently erode. Also required for
+any Round 2 phase that claims a measured speedup.
+
+## Phase 9 — Chez: sealed-RTD record-predicate fold
+
+**Investigated: Chez already folds this correctly.** Verified via two
+paths:
+
+1. `expand/optimize` on
+   `(let () (define-record-type pt (nongenerative pt-uid) (sealed #t) (fields x)) (lambda (v) (pt? v)))`
+   produces `(lambda (v) (#3%$sealed-record? v '#<record type pt-uid>))`.
+   The fold is done by the `define-inline 2 record-predicate` rule in
+   `s/cp0.ss` (line 3723) — it detects sealed RTDs and emits
+   `$sealed-record?` at primref level 3, which `s/cpprim.ss`
+   (`build-sealed-isa?`, line 8308) lowers to a single typed-object
+   tag check plus an `eq?` against the literal rtd.
+
+2. Micro-bench (`tmp/phase9-lib-bench.ss`) inside a library at
+   optimize-level 3: user predicate `point?` and direct
+   `#3%$sealed-record?` both clock 1.09 ns/op — identical. Safe mode
+   (level 2): both 1.80 ns/op. No gap.
+
+The only case where the fold doesn't apply is top-level script
+definitions (cp0 conservatively won't inline top-level `define` RHS
+in case someone rebinds). That's not a real workload — Jerboa code
+lives in libraries.
+
+**Deliverable:** regression mat `cptypes-sealed-record-predicate-fold`
+in `mats/cptypes.ms` that pins the behavior so a future cp0/cpprim
+change can't silently un-fold it.
+
+No code changes to `s/cp0.ss` or `s/cpprim.ss` needed.
+
+## Phase 10 — Chez: cptypes specialize bytevector/string ops
+
+Same pattern as `0cba64de` (hashtables). Once cptypes proves a value
+is a bytevector/string, rewrite `bytevector-u8-ref`/`string-ref` etc.
+to their `#3%` level-3 variants. Add mat in `mats/cptypes.ms`
+paralleling `cptypes-hashtable-specialization`.
+
+## Phase 11 — Chez: type narrowing through user predicates
+
+`(and (foo? x) (bar x))` should let `bar` see `x:foo` inside the
+`and`. Today cptypes narrows through a handful of built-in predicates
+(number?, pair?, etc.) — extend to any `record-predicate` derived from
+a sealed+nongenerative RTD so the Phase 1 structs benefit.
+
+Depends on Phase 9 (the fold has to land first so cptypes sees the
+primitive operation).
+
+## Phase 12 — Jerboa: method-dispatch inline cache
+
+`(~ obj 'method ...)` currently does an eq-hashtable lookup per call
+(see `runtime.sls`'s `call-method`). Add a per-call-site monomorphic
+cache — one-entry PIC keyed on RTD. On hit, direct call; on miss,
+fall back to the hashtable and update the cache.
+
+Expand `~` to wrap the call site in a cache cell. The generated code:
+
+    (let ([cache-rtd #f] [cache-proc #f])
+      (lambda (obj . args)
+        (let ([r (record-rtd obj)])
+          (if (eq? r cache-rtd)
+              (apply cache-proc obj args)
+              (%slow-dispatch-and-cache obj 'method args)))))
+
+Benchmark target: 5–10x on hot method-heavy loops.
+
+## Phase 13 — Jerboa: fuse `in-hash-keys`/`in-hash-values`
+
+Phase 5 already fuses `in-range`/`in-vector`/`in-string`/`in-list`.
+Extend the same macro dispatch to `(in-hash-keys ht)` and
+`(in-hash-values ht)` by iterating via `hashtable-keys`/`-entries`
+directly into the loop body instead of materializing the key/value
+list first.
+
+Mechanical extension of existing Phase 5 machinery.
+
+## Phase 14 — Jerboa: decision-tree match compiler
+
+Current `match2` emits a linear chain of clause tests. Runs of
+patterns sharing a prefix (same tag, same list length) each re-check
+the whole prefix. Replace with a decision-tree compiler that factors
+common prefixes.
+
+Biggest win on large `match` forms (parsers, evaluators). Least
+urgent of the Round 2 set.

@@ -36,6 +36,31 @@ Verified: `make build` clean, 65/65 reader, 68/68 core, 65/65 stdlib.
 `(~ q 'norm)` confirmed to expand to `(call-method q 'norm)` with no
 `apply` in the optimized output.
 
+## Round 3 — further recommendations (identified 2026-04-21)
+
+### Phase 19 — Jerboa: fuse `for/or` / `for/and` iterators
+- Parallel to Phase 13 (`for/collect` fusion) and the existing `for/fold` cases in `lib/std/iter.sls`. `for/or` and `for/and` currently accept only list iter-exprs — passing `(in-range ...)` or `(in-vector v)` allocates the full list first.
+- Add syntax-case arms for `in-range`, `in-vector`, `in-string`, `in-list`, mirroring `for/fold`.
+- Bench: compare `(for/or ((x (in-range 1000000))) (= x 999999))` before/after.
+
+### Phase 20 — Chez cptypes: type-flow through top-level `(define x (make-X ...))`
+- Surfaced by Phase 16: the accessor→`$object-ref` fold only fires inside a predicate-guarded branch, not when `x` is a top-level binding of known sealed RTD. The cptypes lattice needs a "constant top-level value of record-type T" node that flows through `(define x (make-T ...))` to all downstream uses.
+- Biggest single optimizer win available: ~5.6x on accessor cost where applicable.
+- Complexity: significant — touches cptypes-env management and top-level fixpoint analysis. Dedicated session.
+
+### Phase 21 — Chez / Jerboa: regex literal promotion
+- Proposed in §6 of original plan; re-examine now that `(std regex)` is unified.
+- `(re <literal-string>)` or `(rx <SRE literal>)` with only compile-time-constant children should fold to a pre-compiled re-object at expansion time.
+- Needs: re-objects FASL-serialisable, or the macro can invoke the compiler at expansion time (Chez allows this via `meta`).
+
+### Phase 22 — Chez cp0 / Jerboa: fold adjacent literal `string-append` args
+- `(string-append "abc" x "def" "ghi" y)` → `(string-append "abc" x "defghi" y)`. Cheap in an identifier-macro over `str`, cheaper still as a cp0 rewrite since all Jerboa `str` / format helpers bottom out in `string-append`.
+
+### Phase 23 — Chez cptypes: finish §1.3 bulk-ops specialization
+- `hashtable-keys`, `hashtable-values`, `hashtable-entries`, `hashtable-cells` still fall through the generic dispatch even when the first argument is a known `eq-hashtable`. These were deprioritised in the original plan because they are O(n), but the fold is mechanical and keeps the pattern coverage consistent with Phase 15.
+
+---
+
 ## Still out of scope
 
 - **§3.3 full method-cache primitive** (beyond the `~` macro-ization):

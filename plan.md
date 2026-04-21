@@ -9,6 +9,7 @@ Baseline: `07f3fd90 newhash: dispatch generic hashtable ops via sealed-record pr
 - `1c7da443` newhash: sealed-RTD dispatch extended to bulk / introspection ops
 - `0cba64de` cptypes: statically specialize the seven hot R6RS hashtable ops (`ref/set!/contains?/delete!/update!`) to `#3%eq-hashtable-*` / `#3%symbol-hashtable-*` when first arg's subtype is known
 - `c83b6fb1` cptypes: same specialization for `hashtable-cell` and `hashtable-ref-cell`
+- `5ef55185` cptypes: 2-arg `hashtable-clear!` / `hashtable-copy` route to sealed `$eq-hashtable-*` variants (argc-gated so 1-arg forms keep the generic path)
 - `9e389cc7` plan: Phase 4 landed record
 - `2df03b20` mats/cptypes.ms: regression-guard mat (`cptypes-hashtable-specialization`) asserting each of the seven ops rewrites at compile time
 - `bench/jerboa-bench.ss`: baseline Jerboa-shaped workload bench

@@ -319,7 +319,7 @@
   ((r6rs: string>=?) [sig [(string string string ...) -> (boolean)]] [flags mifoldable discard safeongoodargs ieee r5rs])  ; restricted to 2+ arguments
   ((r6rs: string>?) [sig [(string string string ...) -> (boolean)]] [flags mifoldable discard safeongoodargs ieee r5rs])   ; restricted to 2+ arguments
   (substring [sig [(string sub-length sub-length) -> (string)]] [flags alloc ieee r5rs])
-  (string-append [sig [(string ...) -> (string)]] [flags alloc safeongoodargs ieee r5rs])
+  (string-append [sig [(string ...) -> (string)]] [flags alloc safeongoodargs ieee r5rs cp02])
   (string->list [sig [(string) -> (list)]] [flags alloc safeongoodargs ieee r5rs])
   (list->string [sig [(sub-list) -> (string)]] [flags alloc ieee r5rs])
   (string-for-each [sig [(procedure string string ...) -> (ptr ...)]] [flags cp03])

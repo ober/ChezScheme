@@ -2639,6 +2639,38 @@
     '(lambda () (#3%string->symbol (make-string 10 #\a))))
 )
 
+(mat cp0-string-append-adjacent-literal-fold
+  ; Runs of adjacent literal-string arguments to string-append collapse
+  ; into a single literal at the `define-inline 2 string-append` site in
+  ; s/cp0.ss.  The call itself is preserved so the result remains a
+  ; freshly allocated mutable string — callers that rely on string-set!
+  ; on the return value must not be broken by this rewrite.
+  ;
+  ; Motivation: Jerboa's (str ...) macro bottoms out in string-append,
+  ; so tight format-style code like (str "key=" v ", ts=" t) amortizes
+  ; a boundary-free allocation when both ends are literal.
+  (cptypes-equivalent-expansion?
+    '(lambda (x) (string-append "a" "b" x "c" "d"))
+    '(lambda (x) (string-append "ab" x "cd")))
+  ; Leading-literal run folds and the call is preserved (not constant-folded).
+  (cptypes-equivalent-expansion?
+    '(lambda (x) (string-append "a" "b" "c" x))
+    '(lambda (x) (string-append "abc" x)))
+  ; All-literal call still emits the primcall (no aliasing of the result
+  ; across callsites).
+  (cptypes-equivalent-expansion?
+    '(lambda () (string-append "a" "b" "c"))
+    '(lambda () (#3%string-append "abc")))
+  ; Zero-argument form folds to the empty literal directly.
+  (cptypes-equivalent-expansion?
+    '(lambda () (string-append))
+    '(lambda () ""))
+  ; No adjacent literals — nothing to fold, call passes through.
+  (cptypes-equivalent-expansion?
+    '(lambda (x y z) (string-append x y z))
+    '(lambda (x y z) (string-append x y z)))
+)
+
 (mat cptypes-user-record-predicate-narrowing
   ; When cptypes sees a user-defined record predicate succeed in test
   ; position, every field accessor in the consequent narrows to the

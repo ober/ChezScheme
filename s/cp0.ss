@@ -2804,7 +2804,45 @@
           [e* (build-append-immediate-vectors 'vector e* ctxt)])
         (define-inline 2 immutable-vector-append
           [(e) (build-immediate-immutable-vector e ctxt)]
-          [e* (build-append-immediate-vectors 'immutable-vector e* ctxt)]))
+          [e* (build-append-immediate-vectors 'immutable-vector e* ctxt)])
+
+        ;; string-append: merge runs of adjacent literal-string arguments so
+        ;; (string-append "a" x "b" "c" y "d") collapses to
+        ;; (string-append "a" x "bc" y "d").  The call itself is preserved
+        ;; (not folded to a literal) because string-append must return a
+        ;; fresh mutable string even when every argument is constant.
+        (define-inline 2 string-append
+          [() (residualize-seq '() '() ctxt) `(quote "")]
+          [orig-e*
+           (let ([val* (map value-visit-operand! orig-e*)])
+             (let loop ([val* val*] [run '()] [acc '()])
+               (define (flush-run acc run)
+                 (cond
+                   [(null? run) acc]
+                   [(null? (cdr run)) (cons (car run) acc)]
+                   [else
+                    (let ([s (apply string-append
+                               (map (lambda (q)
+                                      (nanopass-case (Lsrc Expr) q
+                                        [(quote ,d) d]))
+                                    (reverse run)))])
+                      (cons `(quote ,s) acc))]))
+               (cond
+                 [(null? val*)
+                  (let ([new-e* (reverse (flush-run acc run))])
+                    (cond
+                      [(fx= (length new-e*) (length orig-e*)) #f]
+                      [else
+                       (residualize-seq '() orig-e* ctxt)
+                       (build-primcall (app-preinfo ctxt) 2 'string-append new-e*)]))]
+                 [else
+                  (let ([e (car val*)])
+                    (nanopass-case (Lsrc Expr) (result-exp e)
+                      [(quote ,d)
+                       (guard (string? d))
+                       (loop (cdr val*) (cons `(quote ,d) run) acc)]
+                      [else
+                       (loop (cdr val*) '() (cons e (flush-run acc run)))]))])))]))
 
       (define-inline 2 string->immutable-string
         [(e) (let ([e-val (value-visit-operand! e)])

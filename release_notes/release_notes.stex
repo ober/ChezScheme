@@ -144,6 +144,21 @@ system primitives. The 1-argument forms are unaffected, since the
 sealed variants require the minlen / mutable flag to be supplied
 explicitly.
 
+\subsection{\scheme{string-append} adjacent-literal folding (10.4.0)}
+
+Runs of adjacent literal-string arguments to \scheme{string-append}
+now collapse into a single literal at compile time. For example,
+\scheme{(string-append "key=" x ", ts=" t ", env=" e)} compiles as if
+it had been written \scheme{(string-append "key=" x ", ts=" t
+", env=" e)} unchanged --- every literal is isolated by a
+non-literal --- whereas
+\scheme{(string-append "error: " "invalid " "input at " pos)} reduces
+to \scheme{(string-append "error: invalid input at " pos)} with a
+single two-argument primitive call at run time.  The \scheme{string-append}
+call itself is preserved even when every argument is constant so that
+the result remains a freshly allocated mutable string, matching the
+R6RS semantics for \scheme{string-set!} on the return value.
+
 \subsection{Named Cost Center (10.4.0)}
 
 The procedure \scheme{make-cost-center} now

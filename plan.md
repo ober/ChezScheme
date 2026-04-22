@@ -38,23 +38,26 @@ Verified: `make build` clean, 65/65 reader, 68/68 core, 65/65 stdlib.
 
 ## Round 3 — further recommendations (identified 2026-04-21)
 
-### Phase 19 — Jerboa: fuse `for/or` / `for/and` iterators
-- Parallel to Phase 13 (`for/collect` fusion) and the existing `for/fold` cases in `lib/std/iter.sls`. `for/or` and `for/and` currently accept only list iter-exprs — passing `(in-range ...)` or `(in-vector v)` allocates the full list first.
-- Add syntax-case arms for `in-range`, `in-vector`, `in-string`, `in-list`, mirroring `for/fold`.
-- Bench: compare `(for/or ((x (in-range 1000000))) (= x 999999))` before/after.
+### Phase 19 — Jerboa: fuse `for/or` / `for/and` iterators — **LANDED (jerboa `aa7f92c`)**
+- Parallel to Phase 13 (`for/collect` fusion) and the existing `for/fold` cases in `lib/std/iter.sls`. `for/or` and `for/and` previously accepted only list iter-exprs — passing `(in-range ...)` or `(in-vector v)` allocated the full list first.
+- Added syntax-case arms for `in-range` (3 arities), `in-vector`, `in-string`, `in-list`, mirroring `for/fold`. `for/or` uses direct `or` short-circuit; `for/and` threads a `last` accumulator to preserve the "return last truthy body result" semantic.
+- Bench `benchmarks/bench-for-or-and.ss` (jerboa `aa7f92c`): 3.5–5.5 ns/iter across fused iterators over 2M elements; matches `for/fold` fusion profile. `test-for-clauses`: 22/22.
 
-### Phase 20 — Chez cptypes: type-flow through top-level `(define x (make-X ...))`
+### Phase 20 — Chez cptypes: type-flow through top-level `(define x (make-X ...))` — **DEFERRED**
 - Surfaced by Phase 16: the accessor→`$object-ref` fold only fires inside a predicate-guarded branch, not when `x` is a top-level binding of known sealed RTD. The cptypes lattice needs a "constant top-level value of record-type T" node that flows through `(define x (make-T ...))` to all downstream uses.
 - Biggest single optimizer win available: ~5.6x on accessor cost where applicable.
-- Complexity: significant — touches cptypes-env management and top-level fixpoint analysis. Dedicated session.
+- Complexity: significant — touches cptypes-env management and top-level fixpoint analysis. Deferred to a dedicated session; cptypes already has rich record-predicate lattice machinery (grep `pred-$record/rtd`, `rtd->record-predicate`) but extending it to track "this top-level binding is a fresh instance of RTD T" requires global fixpoint analysis that cptypes' current forward-pass design does not model. Not attempted in this session.
 
-### Phase 21 — Chez / Jerboa: regex literal promotion
-- Proposed in §6 of original plan; re-examine now that `(std regex)` is unified.
-- `(re <literal-string>)` or `(rx <SRE literal>)` with only compile-time-constant children should fold to a pre-compiled re-object at expansion time.
-- Needs: re-objects FASL-serialisable, or the macro can invoke the compiler at expansion time (Chez allows this via `meta`).
+### Phase 21 — Chez / Jerboa: regex literal promotion — **BLOCKED / OUT OF SCOPE**
+- Proposed in §6 of original plan; re-examined now that `(std regex)` is unified.
+- Goal would be: `(re <literal-string>)` or `(rx <SRE literal>)` folding to a pre-compiled re-object at expansion time.
+- Blocker: re-objects carry a native C handle (u64 pointer from `c-native-compile`) that is not FASL-serializable. A compile-time literal fold would need a separate "handle-less" re-object, or a load-time thunk, both of which add machinery that duplicates what Chez already gives us: literal strings in the same compilation unit are interned `eq?`, so the existing `re-cache-eq` in `regex.sls:238` already hits in a single `eq-hashtable-ref` after the first call (~10 ns amortized). Further promotion is marginal (<8 ns/call savings) and not worth the FASL / reload complexity. Closed.
 
-### Phase 22 — Chez cp0 / Jerboa: fold adjacent literal `string-append` args
-- `(string-append "abc" x "def" "ghi" y)` → `(string-append "abc" x "defghi" y)`. Cheap in an identifier-macro over `str`, cheaper still as a cp0 rewrite since all Jerboa `str` / format helpers bottom out in `string-append`.
+### Phase 22 — Chez cp0: fold adjacent literal `string-append` args — **LANDED**
+- `(string-append "abc" x "def" "ghi" y)` now folds to `(string-append "abc" x "defghi" y)` at the `define-inline 2 string-append` site in `s/cp0.ss:2814`. Added `cp02` to `string-append`'s flags in `s/primdata.ss:322` so the inline fires. The call itself is preserved (never constant-folded to a literal) because `string-append` must return a freshly allocated mutable string; folding to a shared literal would alias across callsites and silently change the behavior of `string-set!` on the return value.
+- Regression mat `cp0-string-append-adjacent-literal-fold` in `mats/cptypes.ms` covers: adjacent-literal run in the middle, leading-literal run, all-literal (preserved as primcall), zero-arg (folds to `""`), and no-literal (unchanged). 0 bugs / 0 diffs on `cptypes.mo`, `cp0.mo`, `5_4.mo`.
+- Release notes entry under `release_notes/release_notes.stex` §"string-append adjacent-literal folding".
+- Expand/optimize verification: `(string-append "hello " "there " x "foo " "bar " y)` → `(string-append "hello there " x "foo bar " y)` (6 → 4 args). Bench `benchmarks/bench-string-append.ss`.
 
 ### Phase 23 — Chez cptypes: finish §1.3 bulk-ops specialization
 - `hashtable-keys`, `hashtable-values`, `hashtable-entries`, `hashtable-cells` still fall through the generic dispatch even when the first argument is a known `eq-hashtable`. These were deprioritised in the original plan because they are O(n), but the fold is mechanical and keeps the pattern coverage consistent with Phase 15.

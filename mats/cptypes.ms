@@ -2553,6 +2553,21 @@
   (cptypes-equivalent-expansion?
     '(lambda (m) (hashtable-copy (make-eq-hashtable) m))
     '(lambda (m) (#3%$eq-hashtable-copy (make-eq-hashtable) m)))
+  ; 2-arg bulk ops (keys / values / entries / cells) also route to the
+  ; sealed $eq-hashtable-* variants.  The 1-arg forms keep the generic
+  ; dispatch because the sealed primitives are strictly 2-arg.
+  (cptypes-equivalent-expansion?
+    '(lambda (n) (hashtable-keys (make-eq-hashtable) n))
+    '(lambda (n) (#3%$eq-hashtable-keys (make-eq-hashtable) n)))
+  (cptypes-equivalent-expansion?
+    '(lambda (n) (hashtable-values (make-eq-hashtable) n))
+    '(lambda (n) (#3%$eq-hashtable-values (make-eq-hashtable) n)))
+  (cptypes-equivalent-expansion?
+    '(lambda (n) (hashtable-entries (make-eq-hashtable) n))
+    '(lambda (n) (#3%$eq-hashtable-entries (make-eq-hashtable) n)))
+  (cptypes-equivalent-expansion?
+    '(lambda (n) (hashtable-cells (make-eq-hashtable) n))
+    '(lambda (n) (#3%$eq-hashtable-cells (make-eq-hashtable) n)))
 )
 
 (mat cptypes-sealed-record-predicate-fold

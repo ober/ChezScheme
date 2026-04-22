@@ -59,8 +59,11 @@ Verified: `make build` clean, 65/65 reader, 68/68 core, 65/65 stdlib.
 - Release notes entry under `release_notes/release_notes.stex` §"string-append adjacent-literal folding".
 - Expand/optimize verification: `(string-append "hello " "there " x "foo " "bar " y)` → `(string-append "hello there " x "foo bar " y)` (6 → 4 args). Bench `benchmarks/bench-string-append.ss`.
 
-### Phase 23 — Chez cptypes: finish §1.3 bulk-ops specialization
-- `hashtable-keys`, `hashtable-values`, `hashtable-entries`, `hashtable-cells` still fall through the generic dispatch even when the first argument is a known `eq-hashtable`. These were deprioritised in the original plan because they are O(n), but the fold is mechanical and keeps the pattern coverage consistent with Phase 15.
+### Phase 23 — Chez cptypes: finish §1.3 bulk-ops specialization — **LANDED**
+- Four new arms added to `specialize-ht-op` in `s/cptypes.ss:1269-1272` rewriting 2-arg calls to `hashtable-keys` / `hashtable-values` / `hashtable-entries` / `hashtable-cells` with a known `eq-hashtable` first argument to `$eq-hashtable-keys` / `$eq-hashtable-values` / `$eq-hashtable-entries` / `$eq-hashtable-cells`. The names were added to the `define-specialize 2` list at `s/cptypes.ss:1287-1288`, and `cptypes2` was added to the flags on all four primitives in `s/primdata.ss:1465-1469`. Mirror of Phase 15. Only the 2-arg form is specialized — the 1-arg form would require synthesising `(most-positive-fixnum)` as the default capacity, which is cheaper to leave in the generic dispatcher.
+- Regression mat in the existing `(mat cp0-hashtable-op-eq-specialization ...)` in `mats/cptypes.ms` — four new `cptypes-equivalent-expansion?` cases. 0 failures on `cptypes.mo` and `5_4.mo`.
+- Release notes entry folded into the existing §"Specialized hashtable dispatch in type-recovery pass" subsection.
+- Expand/optimize verification: `(lambda (h sz) (hashtable-keys (make-eq-hashtable) sz))` emits `(#3%$eq-hashtable-keys ...)`; pass-through verified for 1-arg form and non-eq tables.
 
 ---
 

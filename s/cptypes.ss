@@ -1258,6 +1258,17 @@ Notes:
                ;; variants take 2 args, so specialize only that form.
                [(hashtable-clear!) (and (fx= argc 2) '$eq-hashtable-clear!)]
                [(hashtable-copy)   (and (fx= argc 2) '$eq-hashtable-copy)]
+               ;; Bulk ops (keys/values/entries/cells) are also case-lambda
+               ;; with a 1-arg and 2-arg shape; the sealed `$eq-hashtable-*`
+               ;; variants take exactly (h max-sz), so only the 2-arg
+               ;; caller form gets specialized.  The 1-arg form keeps
+               ;; the dispatch wrapper because we'd have to synthesize
+               ;; the (most-positive-fixnum) default, which is cheaper
+               ;; in a dedicated expander pass than inside cptypes.
+               [(hashtable-keys)    (and (fx= argc 2) '$eq-hashtable-keys)]
+               [(hashtable-values)  (and (fx= argc 2) '$eq-hashtable-values)]
+               [(hashtable-entries) (and (fx= argc 2) '$eq-hashtable-entries)]
+               [(hashtable-cells)   (and (fx= argc 2) '$eq-hashtable-cells)]
                [else #f])]
             [(predicate-implies? first-arg-type $symbol-ht-pred)
              (case prim-name
@@ -1273,7 +1284,9 @@ Notes:
         (define-specialize 2 (hashtable-ref hashtable-set! hashtable-contains?
                               hashtable-delete! hashtable-update!
                               hashtable-cell hashtable-ref-cell
-                              hashtable-clear! hashtable-copy)
+                              hashtable-clear! hashtable-copy
+                              hashtable-keys hashtable-values
+                              hashtable-entries hashtable-cells)
           [e* (and (pair? e*)
                    (let* ([r* (get-type e*)]
                           [alt-name (specialize-ht-op prim-name (car r*) (length e*))])

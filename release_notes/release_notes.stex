@@ -144,6 +144,17 @@ system primitives. The 1-argument forms are unaffected, since the
 sealed variants require the minlen / mutable flag to be supplied
 explicitly.
 
+The 2-argument forms of the bulk accessors \scheme{hashtable-keys},
+\scheme{hashtable-values}, \scheme{hashtable-entries}, and
+\scheme{hashtable-cells} are specialized the same way: a known
+\scheme{eq-hashtable} argument rewrites the call to the sealed
+\scheme{\$eq-hashtable-keys}, \scheme{\$eq-hashtable-values},
+\scheme{\$eq-hashtable-entries}, or \scheme{\$eq-hashtable-cells}
+primitive, skipping the run-time subtype dispatch. As with
+\scheme{hashtable-clear!} and \scheme{hashtable-copy}, the 1-argument
+forms are left alone because the sealed variants take the result-vector
+capacity as a required second argument.
+
 \subsection{\scheme{string-append} adjacent-literal folding (10.4.0)}
 
 Runs of adjacent literal-string arguments to \scheme{string-append}

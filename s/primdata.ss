@@ -1462,11 +1462,11 @@
   (hash-table-for-each [sig [(old-hash-table procedure) -> (void)]] [flags])
   (hash-table-map [sig [(old-hash-table procedure) -> (list)]] [flags true])
   (hashtable-cell [sig [(old-hash-table ptr ptr) -> ((ptr . ptr))]] [flags true cptypes2])
-  (hashtable-cells [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc])
-  (hashtable-entries [sig [(hashtable) -> (vector vector)] [(hashtable uint) -> (vector vector)]] [flags discard]) ; has size argument
-  (hashtable-keys [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc])                    ; has size argument
+  (hashtable-cells [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc cptypes2])
+  (hashtable-entries [sig [(hashtable) -> (vector vector)] [(hashtable uint) -> (vector vector)]] [flags discard cptypes2]) ; has size argument
+  (hashtable-keys [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc cptypes2])                    ; has size argument
   (hashtable-ref-cell [sig [(hashtable ptr) -> (ptr)]] [flags discard cptypes2])
-  (hashtable-values [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc])
+  (hashtable-values [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc cptypes2])
   (hashtable-weak? [sig [(hashtable) -> (boolean)]] [flags pure mifoldable discard])
   (iconv-codec [feature iconv] [sig [(sub-string) -> (codec)]] [flags pure true])
   (ieee-environment [sig [() -> (environment)]] [flags unrestricted alloc])

@@ -962,6 +962,50 @@ That's one extra compare per *iterator start* (not per step) — cheap.
 
 Deliverable: iter.sls patch + extensions to `tests/test-for-clauses.ss`.
 
+**Status:** LANDED.
+
+Added fused `for` / `for/collect` / `for/fold` clauses in
+`lib/std/iter.sls` (jerboa) for six iterator forms:
+`in-pvec`, `in-pmap`, `in-pmap-pairs`, `in-pmap-keys`,
+`in-pmap-values`, `in-pset`. Before Phase 28, all six went through the
+unfused fallback which calls `for-each` on a list materialised by
+`in-*` (so iterating a 1,000-element pvec cons'd a 1,000-long list).
+The new arms skip the materialise step entirely:
+
+- `in-pvec` expands to an `(fx< i n)` loop over
+  `persistent-vector-ref` — zero list allocation, O(log32) ref per step.
+- `in-pmap` family expands to `persistent-map-for-each` with the
+  iteration lambda wrapping `body ...`; iterates the HAMT directly.
+- `in-pset` expands to `persistent-set-for-each` similarly.
+
+Semantics: `in-pmap` yields `(cons k v)` per step (matches Clojure's
+`(for [[k v] m] ...)` idiom once destructured) and is defined as an
+alias for `in-pmap-pairs`. Fused and unfused paths yield the same
+shape.
+
+Jerboa-side changes:
+- `lib/std/pvec.sls`: added `in-pvec` export, defined as
+  `(define (in-pvec v) (persistent-vector->list v))` — fallback for
+  unfused use; fused path never calls it.
+- `lib/std/iter.sls`: imported `in-pmap*`, `in-pvec`, `in-pset` and
+  their backing `persistent-{map,set}-for-each` + `persistent-vector-*`
+  from (std pmap) / (std pvec) / (std pset) so the syntax-case
+  literal-identifier match (free-identifier=?) resolves correctly for
+  user code that imports these identifiers from the same libraries.
+  Re-exported the iterators from iter so users can import either
+  location.
+
+Tests: `tests/test-iter-persistent.ss`, 20 cases — per-iterator
+correctness, empty collections, large pvec (50 elements), pmap
+pair-destructure, set-equivalence checks for hash-ordered iteration
+(pmap / pset iteration order is not insertion order).
+Regression: `tests/test-for-clauses.ss` still 22/22.
+
+Skipped in Phase 28: fused arms for `for/or` / `for/and` over
+persistent collections. They'd need CPS-style short-circuit over
+`for-each` (call/cc or escape) — parked until a real benchmark shows
+those are hot.
+
 ## Phase 29 — Chez cptypes: specialise pmap / pvec hot paths
 
 **Chez-side:**  Round 1 Phase 2 work specialised `eq-hashtable-ref`

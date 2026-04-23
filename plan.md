@@ -1042,6 +1042,61 @@ record-type annotation per library, one mat, one bench delta.
 Could resolve with **zero Chez change** if generic machinery
 already covers it.
 
+**Status:** PARTIAL — Jerboa side LANDED; Chez side DEFERRED.
+
+Landed (Jerboa side): `nongenerative` UIDs on the five externally-
+visible record types:
+
+- `%pmap`    → `jerboa-pmap-v1`
+- `%pvec`    → `jerboa-pvec-v1`
+- `%pset`    → `jerboa-pset-v1`
+- `%tmap`    → `jerboa-tmap-v1`
+- `%tset`    → `jerboa-tset-v1`
+
+Also pinned `%transient` (inside pvec.sls, bulk-construction helper)
+as `jerboa-pvec-transient-v1` for completeness. Internal HAMT nodes
+(hamt-leaf, hamt-node, hamt-coll, pvec-node) remain generative —
+they're implementation details not observed by cp0 across units.
+
+Effect: within WPO output, cp0's type propagation now tracks these
+RTDs across library boundaries. `(persistent-map? x)` can fold to
+`#t` at a callsite where cp0 proved `x` is a pmap, even when the
+construction and the test live in different libraries. Before
+Phase 29, each library got a fresh RTD UID on instantiation, making
+cross-unit folding impossible.
+
+Regression: `tests/test-persistent-nongenerative.ss` (8 cases) pins
+the UID symbols; someone removing the nongenerative clause fails the
+test loudly. All 191 existing persistent-collection tests (pmap 45,
+pvec 30, pset 30, equal 22, printers 14, match2 30, iter 20) still
+pass — the nongenerative declaration is pure metadata.
+
+Deferred (Chez side): full cptypes specialization via `#3%`-prefixed
+fast-path primitives. The architectural blocker is that
+`persistent-map-ref` and friends are Jerboa-library-defined
+procedures, not Chez primitives, so they can't be registered in
+`primdata.ss` without Chez learning Jerboa-specific names. Two paths
+unblock this in a future round:
+
+1. Generic user-declared specializer mechanism in cptypes — let
+   Scheme libraries register `(specialize-when (first-arg-is RTD))`
+   rewrites without primdata edits. A real Chez language feature;
+   scope for a later plan.
+2. Chez primdata entries for a fixed set of Jerboa-side "standard
+   persistent" operations, with Jerboa libraries importing the
+   corresponding `#3%` variants. Layering-unfriendly but mechanically
+   straightforward.
+
+Scope gate met: Phase 24's audit already flagged "missing
+nongenerative UIDs" as the concrete deliverable for this phase. The
+`#3%` work is explicitly listed as prerequisite-heavy in the plan
+text; punting it is the intended escape hatch.
+
+Follow-up task for Round 5 or later: the deferred Phase 24 bench
+suite (bench-persistent.ss) to measure whether cp0's post-Phase-29
+cross-unit predicate-folding is yielding real speedups, and whether
+a #3%-specialized `persistent-map-ref` would measurably help.
+
 ## Phase 30 — Cookbook recipes + tutorial extension
 
 **Chez-side:** none.

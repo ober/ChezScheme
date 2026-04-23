@@ -902,6 +902,40 @@ specialised compiler arm for a new pattern shape.
 
 Deliverable: match2 patch + one test file.
 
+**Status:** LANDED.
+
+Added three new pattern arms to `lib/std/match2.sls` (jerboa) with
+aliases `(persistent-map | pmap | imap k p ...)`,
+`(persistent-vector | pvec | ivec p ...)`, and
+`(persistent-set | pset x ...)`. Match2 now imports the predicates,
+has?, ref, length, and contains? procedures from `(std pmap)`,
+`(std pvec)`, and `(std pset)` directly — hygiene works across library
+boundaries without datum->syntax tricks.
+
+Key correctness decision: the type-guard (`persistent-map?`,
+`persistent-set?`) wraps the ENTIRE chain of `has?` / `contains?`
+calls, not just the innermost success branch. Initial implementation
+had the guard innermost, which crashed `%pmap-equal-proc` when
+matching `'(1 2 3)` against `(pmap 'a x)` because `persistent-map-has?`
+delegates to hashtable machinery that calls the RTD's equal-proc.
+Fix was to emit `(if (persistent-map? v) <chain> fail)` with the chain
+built from the inside out via a let-accumulator.
+
+pvec arm already had the guard outermost (length check combined with
+`persistent-vector?` in a single `(and …)`), no fix needed there.
+
+Tests: `tests/test-match2-persistent.ss`, 30 cases including simple
+extract, alias forms (`persistent-map`/`pmap`/`imap`,
+`persistent-vector`/`pvec`/`ivec`), non-match fall-through for
+non-persistent values (the regression case), nested patterns
+(pmap-of-pvec, pvec-of-pmap, pmap-of-pset), empty pattern type-only
+checks, guards (`(where …)`), and predicate subpatterns
+(`(and (? number?) n)`). Regression: `tests/test-match2.ss` still
+62/62 and `tests/test-match-syntax.ss` still 68/68.
+
+Deferred to a later phase if needed: list-pattern-style `... rest`
+tail capture for pvec. Current pvec arm requires exact length.
+
 ## Phase 28 — `for` iteration polymorphism
 
 **Chez-side:** none.

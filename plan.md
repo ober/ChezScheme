@@ -664,3 +664,366 @@ Deferred.
 
 Companion commits in the Jerboa repo:
 `2f1c79d` (same-length fusion) + `a017126` (mixed-length runs).
+
+---
+
+# Round 4 — Persistent-collections parity with Clojure (2026-04-23)
+
+Context: Competitive gap #2 against Clojure was "persistent immutable
+data structures — HAMT-backed persistent maps/sets/vectors with
+structural sharing, transducers fall out of this."  On inspection,
+Jerboa already ships the implementations:
+
+| Library | LOC | What it is |
+|---|---|---|
+| `lib/std/pmap.sls` | 868 | HAMT (bitmap-indexed node + collision bucket + leaf), transients with Clojure-style edit-owner protocol |
+| `lib/std/pvec.sls` | 328 | 32-way branching trie + tail optimisation, transients |
+| `lib/std/pset.sls` | 253 | Thin wrapper on pmap (element → #t) with union / intersection / difference |
+| `lib/std/immutable.sls` | 167 | Short `imap` / `ivec` aliases |
+| `lib/std/transducer.sls` | 588 | Full transducer stack (`mapping` / `filtering` / `taking` / `cat` / `into` / `transduce` / `eduction`) |
+| `lib/std/sorted-set.sls` + `lib/std/ds/sorted-map.sls` | 115 + ? | Red-black tree backed sorted set/map |
+| `lib/std/clojure.sls` | 1924 | Compat layer: `hash-map` / `vec` / `set` / `assoc` / `get` / `conj` / `into` / `reduce` / `seq` / `first` / `rest` / `get-in` / `assoc-in` / `update-in` |
+
+Tests exist for all five persistent libs.  The bones are done.  The
+remaining gap is **UX, integration, and measurement**, not
+implementation:
+
+1. Persistent collections don't participate in Chez's `equal?` or
+   `equal-hash` — two structurally equal pmaps aren't `equal?`, and
+   neither can key a hashtable.  This is the biggest correctness gap.
+2. Their default printers emit record-internal noise rather than a
+   readable surface form, so REPL round-trips look ugly.
+3. `match` has no destructuring patterns for them — users fall back
+   to manual `(pmap-ref m 'k)` inside a `_` wildcard.
+4. `for`'s clause-expander recognises `(in-pmap ht)` / `(in-imap-values ht)`
+   but not a bare `pmap` value — so `(for ((v pm)) …)` doesn't work
+   the way `(for ((v list)) …)` does on Clojure.
+5. No cross-library benchmarks — every perf claim versus Chez native
+   hashtables is guesswork.
+6. cp0 / cptypes don't yet fold persistent-collection predicates or
+   specialise hot accessor paths the way they now do for Chez
+   eq-hashtables.  The sealed-RTD machinery from Rounds 1–3 should
+   apply straight through once the persistent types are declared
+   nongenerative with stable UIDs.
+7. Cookbook has no `jerboa_howto` recipes for persistent idioms, so
+   the LLM-discoverability story for "how do I build an immutable
+   state atom" is weak even though the code exists.
+
+Ordering rationale: audit + bench first (Phase 24) so every later
+phase ships a measurable delta.  Then `equal?` / `equal-hash`
+integration (Phase 25), since it's a correctness fix that unblocks
+the rest — you can't benchmark `pmap-as-hashtable-key` until it works.
+Printers (Phase 26) are cheap and make every later debugging session
+sane.  `match` (Phase 27) and `for`-iter polymorphism (Phase 28) close
+the day-to-day ergonomic gap.  Chez-side folds (Phase 29) extend the
+Round 1 sealed-RTD dispatch work into persistent-collection territory.
+Cookbook (Phase 30) closes the LLM-discoverability loop so future
+sessions find the existing work instead of reinventing it.
+
+## Phase 24 — Audit + benchmark harness — **AUDIT LANDED, BENCH DEFERRED**
+
+Audit findings (2026-04-23):
+
+| Library | `=?` helper | `hash` helper | `nongenerative` UID | `record-type-equal-procedure` | `record-type-hash-procedure` | `record-writer` |
+|---|---|---|---|---|---|---|
+| pmap | ✓ `persistent-map=?` | ✓ `persistent-map-hash` | ✗ | ✗ | ✗ | ✗ |
+| pvec | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| pset | ✓ `persistent-set=?` | ✓ `persistent-set-hash` | ✗ | ✗ | ✗ | ✗ |
+
+Biggest gaps: pvec is missing structural equality/hash helpers entirely;
+none of the three participate in Chez's `equal?` / `equal-hash` / printer
+protocols. Phase 25 and 26 address the latter; Phase 29 addresses the
+missing nongenerative UIDs. The benchmark suite itself is deferred
+until after the correctness fixes land so baselines reflect the final
+`equal?` / `equal-hash` / `record-writer` cost rather than a moving
+target.
+
+**Jerboa-side (bench suite, deferred):**
+1. Read each of `pmap.sls`, `pvec.sls`, `pset.sls`, `transducer.sls`,
+   `sorted-set.sls` and catalogue:
+   - What's nongenerative with a stable UID (cp0 can fold predicates)
+     vs generative (can't).
+   - Which accessors are wrapped vs directly a `define-record-type`
+     accessor (the wrapper prevents cptypes narrowing).
+   - Which constructors go through a transient (one final `%pmap`
+     allocation) vs repeated persistent updates.
+2. Add `tests/bench-persistent.ss` to the existing bench-suite
+   pattern (same shape as `tests/bench-suite.ss`).  Benches:
+   - `pmap-ref` hot-loop (100k-entry map, 1M lookups)
+   - `pmap-set` functional update (1M updates)
+   - `pmap` construction via transient (10k-entry build)
+   - `pvec-ref` hot-loop (100k-element vector, 1M lookups)
+   - `pvec-push` append (1M appends)
+   - `pset-contains?` hot-loop
+   - `transduce` map+filter+take over 1M-element list vs plain
+     `filter-map` + `take`
+   - Comparison baseline: Chez `eq-hashtable` and mutable vector for
+     the same workload — the multiplier is the live metric.
+3. Record results as `tests/bench-persistent-baseline.scm`; companion
+   script `tools/bench-persistent-compare.sh` diffs against it.
+4. Hook into `make bench-persistent`.
+
+Deliverables: `tests/bench-persistent.ss`, baseline JSON,
+`docs/persistent-collections-audit.md` (short note summarising what
+each library does and the current throughput multiplier vs native).
+
+## Phase 25 — `equal?` and `equal-hash` integration — **LANDED (2026-04-23)**
+
+Implemented as described below. Zero Chez changes. Jerboa `lib/std/pmap.sls`,
+`lib/std/pset.sls` each gained a two-line `record-type-equal-procedure` /
+`record-type-hash-procedure` registration wiring the existing
+`persistent-map=?` / `persistent-map-hash` (and set equivalents) into
+Chez's generic equality protocol. `lib/std/pvec.sls` gained new
+`persistent-vector=?` / `persistent-vector-hash` helpers (with recursive
+value handling mirroring the pmap design: ordered element-wise compare,
+order-dependent position-mixed hash, falls through to `equal?` /
+`equal-hash` at leaves) plus the same two-line registration.
+
+Regression test: `tests/test-persistent-equal.ss` — 22/22 pass. Covers
+same-order and reversed-order pmap equality, pvec ordering sensitivity,
+pset order-independence, nested collections, and — most critically —
+pmap/pvec/pset working as keys in an `equal-hashtable`. Existing
+`tests/test-pmap.ss` (45), `tests/test-pvec.ss` (30), `tests/test-pset.ss`
+(30) still green. Core (68) and stdlib (65) suites still green.
+
+**Chez-side:** none — Chez already dispatches `equal?` and
+`equal-hash` through the record-type's `equal-procedure` /
+`hash-procedure` when set via `(record-type-equal-procedure rtd proc)`
+/ `(record-type-hash-procedure rtd proc)`.
+
+**Jerboa-side:**
+1. In `lib/std/pmap.sls`, after the `%pmap` define-record-type,
+   register:
+
+       (record-type-equal-procedure (record-type-descriptor %pmap)
+         (lambda (a b rec-equal?) (persistent-map=? a b rec-equal?)))
+       (record-type-hash-procedure (record-type-descriptor %pmap)
+         (lambda (pm rec-hash) (persistent-map-hash pm rec-hash)))
+
+   `persistent-map=?` already exists; thread a `rec-equal?` argument
+   through so nested persistent values recursively compare.
+   `persistent-map-hash` must produce a hash that is order-independent
+   (xor per entry) so two maps with the same keys in different
+   insertion order hash to the same value.  This matches Clojure's
+   contract.
+2. Mirror in `lib/std/pvec.sls` (order-dependent hash, element-by-element
+   compare) and `lib/std/pset.sls` (order-independent hash).
+3. Test in `tests/test-pmap-equal.ss`:
+   - Two pmaps with same contents but different insertion orders are
+     `equal?`.
+   - A pmap is a legal key in an `equal-hashtable`; ref-after-set
+     round-trips.
+   - Nested pmap-in-pmap `equal?` works.
+   - `equal-hash` collision rate over 1k random maps is acceptable
+     (< 1% collisions at 1k buckets — sanity check, not a hard
+     target).
+
+Deliverable: two-line registration block per library + one test file.
+Zero surface API change.
+
+## Phase 26 — Printer integration — **LANDED (2026-04-23)**
+
+Three `record-writer` registrations added to `pmap.sls`, `pvec.sls`,
+`pset.sls` emitting respectively:
+
+```
+pmap:  {k1 v1 k2 v2}
+pvec:  [e1 e2 e3]
+pset:  #{e1 e2 e3}
+```
+
+Pmap/pset key order follows internal hash layout (not insertion
+order); pvec retains insertion order. Writer recursively delegates to
+Chez's supplied `wr` callback so string values round-trip through
+quoting and nested persistent collections print uniformly. Regression
+test: `tests/test-persistent-printers.ss` — 14/14 pass. All other
+suites still green.
+
+**Chez-side:** none — Chez supports `(record-writer rtd writer)` to
+override `display` / `write` / `pretty-print` per record type.
+
+**Jerboa-side:**
+1. In `lib/std/pmap.sls`, add after the record-type:
+
+       (record-writer (record-type-descriptor %pmap)
+         (lambda (pm port wr)
+           (write-char #\{ port)
+           (let ([first? #t])
+             (persistent-map-for-each
+               (lambda (k v)
+                 (if first? (set! first? #f) (write-char #\space port))
+                 (wr k port) (write-char #\space port) (wr v port))
+               pm))
+           (write-char #\} port)))
+
+   Surface syntax: `{k1 v1 k2 v2}`.  No commas — matches Clojure
+   minus the colons-as-keywords.
+2. `pvec`: emit `[1 2 3]` (square brackets).
+3. `pset`: emit `#{1 2 3}`.
+4. Write is round-trip-safe for the primitive cases (read-back
+   integration is Phase 26-deeper, deferred — would require reader
+   macros).
+5. Test round-trip + nesting in `tests/test-persistent-printers.ss`.
+
+Deliverable: three record-writer blocks + one test file.
+
+## Phase 27 — `match` destructuring
+
+**Chez-side:** none.
+
+**Jerboa-side:**  Jerboa's match2 dispatcher lives in
+`lib/std/match2.sls`.  Phase 14 (Round 3) showed how to add a
+specialised compiler arm for a new pattern shape.
+
+1. Recognise three new patterns:
+   - `(pm k1 p1 k2 p2 ...)` — pmap destructuring.  Compiles to:
+
+         (and (persistent-map? v)
+              (let ([p1 (persistent-map-ref v k1 *no-match-sentinel*)])
+                (and (not (eq? p1 *no-match-sentinel*))
+                     (let ([p2 ...]) ...))))
+
+     Key literals (quoted symbols, strings, numbers) are compile-time
+     constants; the compiled form does N lookups with no intermediate
+     allocation.
+   - `(pv p1 p2 ... . rest-pat)` — pvec destructuring.  Length gate
+     + per-index `persistent-vector-ref`; `rest-pat` binds a
+     tail-slice pvec (via `persistent-vector-slice`).
+   - `(ps? x)` — pset membership — `(persistent-set-contains? v x)`.
+     Shorthand `(@in ps)` in pattern position.
+2. Register the pattern names in the match2 expander's head-symbol
+   dispatch table.
+3. Tests in `tests/test-match2-persistent.ss` covering:
+   - Simple pmap destructure.
+   - Nested pmap-in-pmap.
+   - pvec with fixed head + `... rest` tail.
+   - Guarded: `(pm 'a (? number? a))`.
+   - Non-match fall-through.
+
+Deliverable: match2 patch + one test file.
+
+## Phase 28 — `for` iteration polymorphism
+
+**Chez-side:** none.
+
+**Jerboa-side:**  `lib/std/iter.sls` already fuses `in-range`,
+`in-vector`, `in-string`, `in-list`, `in-hash-keys`, `in-hash-values`
+(Round 3 Phase 13).  Extend the fuser so a bare persistent collection
+binding (no `in-...` wrapper) dispatches by type:
+
+1. Add clauses matching `(x pm-expr)` where `pm-expr` evaluates to a
+   `persistent-map?` — iterate pairs as `(cons k v)` (matching Clojure
+   `(for [[k v] m] …)` convention).
+2. `(x pv-expr)` → iterate elements.
+3. `(x ps-expr)` → iterate elements.
+4. Fall-through: if the run-time value isn't recognised, raise a
+   clear error referencing the valid collection types.
+
+Because `for` is a macro, the type dispatch happens at expansion
+when the expression syntax is a statically known constructor call
+(`(pmap …)`, `(pvec …)`, `(pset …)`).  When it's a variable binding
+whose type cannot be proved at expansion, emit a small runtime
+dispatch (`(cond [(persistent-map? v) …] [(persistent-vector? v) …] …)`).
+That's one extra compare per *iterator start* (not per step) — cheap.
+
+Deliverable: iter.sls patch + extensions to `tests/test-for-clauses.ss`.
+
+## Phase 29 — Chez cptypes: specialise pmap / pvec hot paths
+
+**Chez-side:**  Round 1 Phase 2 work specialised `eq-hashtable-ref`
+and friends when cptypes proves the first argument is an
+eq-hashtable.  Extend the same pattern to persistent collections,
+conditional on the Jerboa side making `%pmap` and `%pvec`
+nongenerative with stable UIDs.
+
+1. Jerboa side: thread `(nongenerative %pmap-cpt1)` and
+   `(nongenerative %pvec-cpt1)` into the `define-record-type` forms.
+   Recompile prelude WPO.  Companion commit.
+2. Chez side: extend `s/cptypes.ss`'s `specialize-ht-op` machinery —
+   or add a parallel `specialize-pm-op` / `specialize-pv-op` — that
+   when `persistent-map-ref` / `persistent-vector-ref` sees a
+   first-arg whose type is `%pmap` / `%pvec`, rewrites to the
+   internal `#3%`-prefixed fast path.  Prerequisite: the Jerboa
+   library must expose a `#3%` variant of the hot accessor, which
+   requires registering the underlying helper in Chez's primdata.
+3. Measurement: re-run Phase 24 bench.  Expected: ~20-30% reduction
+   in `pmap-ref` / `pvec-ref` per-call cost (matching the
+   hashtable specialisation delta).
+4. Mat: `mats/cptypes.ms` entry
+   `cptypes-persistent-collection-specialization` pinning the
+   rewrite.
+
+Scope gate: Phase 29 depends on Phase 24's measurement.  If the
+audit shows cptypes is already folding accessors via the generic
+`safeongoodargs` machinery (Round 2 Phase 10 showed that's common),
+close Phase 29 with a regression mat and no code change — exactly
+like Phase 10 did for bytevector ops.
+
+Deliverable: up to two Chez primdata / cptypes patches, one Jerboa
+record-type annotation per library, one mat, one bench delta.
+Could resolve with **zero Chez change** if generic machinery
+already covers it.
+
+## Phase 30 — Cookbook recipes + tutorial extension
+
+**Chez-side:** none.
+
+**Jerboa-side:**
+1. `jerboa_howto_add` the following patterns (discovered or
+   re-confirmed during Phases 24–28):
+   - `pmap-build-transient` — build a large pmap efficiently via
+     transient.
+   - `pmap-merge-two` — combining maps idiomatically.
+   - `pmap-as-hashtable-key` (post-Phase 25).
+   - `pvec-tail-push-loop` — the tail-optimisation pattern.
+   - `transducer-pipeline` — typical `transduce` composition.
+   - `sorted-map-range-query` — ordered-range lookup.
+   - `pm-match-destructure` (post-Phase 27).
+   - `for-over-pmap` (post-Phase 28).
+2. Extend `docs/tutorial.md` with a new section 11 ("Going
+   immutable") walking through the Stubby URL shortener rewritten
+   with `imap` / `ivec` for the request logs and counters.  Shows
+   the tradeoff vs mutable hash-table: when to pick which.
+3. `tools/check-doc-examples.sh` runs over the new fences as part
+   of the existing parse-only CI.
+
+Deliverable: 8 howto recipes, tutorial section 11, parse-only CI
+still green.
+
+---
+
+## Execution order
+
+| Phase | Item | Effort | Risk | Gate |
+|-------|------|--------|------|------|
+| 24    | Audit + bench | low–med | low | none — unblocks 25–29 |
+| 25    | equal? / equal-hash | low | low | none |
+| 26    | Printers | low | low | none |
+| 27    | match destructure | med | low–med | 25 (for `equal?` in test guards) |
+| 28    | for-iter polymorphism | med | low | none |
+| 29    | Chez cptypes fold | med | med | 24 shows measurable gap |
+| 30    | Cookbook + tutorial | low | low | 25, 27, 28 (so recipes reflect final API) |
+
+Phases 24, 25, 26, 28 are independent and can ship in any order.
+Phase 27 wants 25 first so match patterns can use `equal?` on
+bound subpatterns.  Phase 29 is gated on measurement.  Phase 30
+ships last so the recipes reflect the final API.
+
+## Non-goals for Round 4
+
+- **New collection types.**  No deques, B-trees, finger trees, or
+  HAMT variants beyond what exists.  The existing five libraries
+  cover the competitive surface.
+- **Reader syntax for `{k v}` / `#{x}` / `[1 2 3]` as map/set/pvec
+  literals.**  Jerboa already uses `[...]` interchangeably with
+  `(...)` (square brackets = parens, like Gerbil/Chez), so
+  reclaiming `[...]` for pvec literals would break existing code.
+  `{...}` conflicts with Jerboa's method-dispatch reader syntax
+  `{method obj args}`.  A reader-syntax push would need a
+  separate round with real reader-macro infrastructure; deferred.
+- **ClojureScript-style browser target.**  Gap #6 from the
+  competitive analysis, not in scope here.
+- **Persistent-collection allocator tuning.**  Chez's generational
+  GC is already well-tuned; pmap allocation churn would need a
+  profiled workload to justify changes to `c/gc.c` or the record
+  allocator.  Not attempted without data.

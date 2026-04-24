@@ -1620,3 +1620,99 @@ follow-up; the plain-script showcase already demonstrates parity.
 | 37| jerboa-db doc sync              | trivial | none | —             |
 | 38| bookstore showcase              | medium  | low  | 37 (clarity)  |
 | 39| web skin (optional)             | medium  | low  | 38            |
+
+## Round 7 — Showcase-driven API polish (identified + LANDED 2026-04-24)
+
+The bookstore showcase from Phase 38 forced three workarounds
+into `examples/bookstore.ss`: a hand-rolled busy-spin for
+`await-for`, a dispatch-fn that manually walked the derive
+hierarchy, and an inline `s-valid?` guard because
+`s-instrument` can't rebind lexical `def` bindings in
+`--script` programs. Round 7 closes all three by adding small,
+targeted APIs so the demo reads like idiomatic Clojure.
+
+**Status (2026-04-24):** all three phases **LANDED**. Bookstore
+showcase now uses the new APIs directly (sections 7, 9, 10);
+no workarounds remain. Unit tests: `test-multi` 48/48,
+`test-spec` 53/53, `test-prelude` 24/24, showcase 12/12 sections.
+
+### Phase 40 — `sleep-ms` wrapper in `(jerboa prelude)` — **LANDED**
+
+`(sleep-ms N)` wraps
+`(sleep (make-time 'time-duration ns sec))` so users don't
+need to import Chez's shadowed `make-time` (the prelude
+re-exports a date-style `(make-time h m s)` constructor that
+hides the time-duration form). Exported from both
+`(jerboa prelude)` and `(std prelude)`. Each prelude imports
+Chez's `make-time` under the private alias `%chez-make-time`
+since the public name is shadowed.
+
+**Shipped:** prelude export, validation (`MS` must be a
+non-negative integer), test in `tests/test-prelude.ss`.
+Bookstore section 7 replaced its busy-spin with `(sleep-ms 300)`.
+
+### Phase 41 — `defmulti :hierarchy` keyword in `(std multi)` — **LANDED**
+
+`defmulti` already defaulted to `global-hierarchy` but could
+not accept a custom hierarchy. Round 7 adds a literal
+`:hierarchy` keyword:
+```scheme
+(defmulti handle-event
+  (lambda (evt) (cdr (assq 'type evt)))
+  :hierarchy events-h)
+```
+
+**Implementation note:** R6RS `syntax-rules` literals must
+point to the same binding at both the use site and the
+definition site. Because `:hierarchy` is unbound at use sites,
+the literal match would fail across a library boundary. Fix:
+export `:hierarchy` from `(std multi)` as an auxiliary
+keyword (`define-syntax :hierarchy (lambda (x) (syntax-violation
+...))`). `s-fdef` sidesteps this by using `syntax-case` with
+`syntax->datum` comparison; for `defmulti` the auxiliary
+keyword is cleaner because the literal appears at a fixed
+argument position.
+
+**Shipped:** `:hierarchy` export, 3-arg `%install`, validation
+that rejects non-hierarchy values, 3 tests exercising dispatch,
+isolation from `global-hierarchy`, and error on bad hierarchy.
+Bookstore section 9 dropped its hand-rolled `ancestors` walk
+and now uses `prefer-method` to disambiguate when methods exist
+at multiple hierarchy levels.
+
+### Phase 42 — `s-defn` macro for script-safe spec instrumentation — **LANDED**
+
+`s-instrument` uses `set-top-level-value!` to rewire a symbol's
+top-level binding. In a `--script` program, by the time
+instrumentation runs other top-level forms may have already
+captured the pre-wrap closure; the instrumented wrapper never
+fires. `s-defn` sidesteps the indirection by baking
+validation into the function body at macro-expansion time:
+```scheme
+(s-defn place-order (isbn qty)
+  :args '::order
+  :ret  '::result
+  (list 'order isbn qty))
+```
+Expands to a plain `(define (name ...) ...)` with inline
+`s-valid?` guards, and also registers an `s-fdef` so
+`s-check-fn` continues to work.
+
+**Design:** the outer macro uses `syntax-case` to parse
+optional `:args`/`:ret` pairs in either order, then hands off
+to an internal `%s-defn-emit` whose `syntax-rules` clauses
+dispatch on the args?/ret? boolean pair. All four
+combinations (both, args-only, ret-only, neither) are
+supported.
+
+**Shipped:** `s-defn` export from `(std spec)`, 9 tests in
+`test-spec.ss`, cookbook integration via bookstore section 10
+replacing the hand-inlined `unless (s-valid? ...)` check.
+
+### Round 7 execution order
+
+| # | Phase                                 | Effort  | Risk | Gate |
+|---|---------------------------------------|---------|------|------|
+| 40| `sleep-ms` prelude wrapper            | trivial | none | —    |
+| 41| `defmulti :hierarchy`                 | small   | low  | —    |
+| 42| `s-defn` script-safe spec             | small   | low  | —    |

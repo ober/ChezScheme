@@ -1191,3 +1191,288 @@ ships last so the recipes reflect the final API.
   GC is already well-tuned; pmap allocation churn would need a
   profiled workload to justify changes to `c/gc.c` or the record
   allocator.  Not attempted without data.
+
+---
+
+## Round 5 — Clojure-parity real-world (identified 2026-04-24)
+
+**Status: all six phases LANDED (2026-04-24).** Tests: atom 37,
+spec 44, protocol 39, multi 45, agent 36, stm 17.
+
+Rounds 1–4 closed the performance and persistent-collection gaps.
+The remaining blockers for production-scale Jerboa use are the
+*functional concurrency* model and the *polymorphism + validation*
+pair that Clojure users lean on daily. Round 5 adds them.
+
+The concurrency ladder (31 → 32 → 33) deliberately ships the
+simplest primitive first so a correctness floor is on trunk before
+STM's complexity lands. The polymorphism pair (34 → 35) shares
+one method-table + cache-invalidation implementation. Spec (36) is
+independent and can slot in anywhere.
+
+### Phase 31 — `atom` (functional mutable reference) — **LANDED (2026-04-24)**
+
+Implementation notes: `set-validator!` / `get-validator` added to
+`(std misc atom)`; `%check-validator!` runs outside the atom's mutex
+for `reset!` and inside for swap!/update!/CAS. Install-time
+pre-check prevents latching a value that violates a new validator.
+Tests: 37 passing in `tests/test-atom.ss`.
+
+**Surface:** `(atom init)`, `(deref a)` / `@a`, `(swap! a fn args ...)`,
+`(reset! a v)`, `(compare-and-set! a old new)`, `(add-watch a key fn)`,
+`(remove-watch a key)`, `(set-validator! a pred)`.
+
+**Semantics:** `swap!` retries on CAS failure; the `fn` must be pure
+(may run multiple times). Validator runs before the transition;
+watchers run after, outside the CAS loop. Matches Clojure atoms 1:1.
+
+**Jerboa-side:** new `(std atom)` library — record `%atom` with one
+mutable field plus watcher alist and optional validator. Uses Chez's
+`make-mutex` + `with-mutex` for the initial implementation; upgrade
+to lock-free CAS once Chez-side `compare-and-swap!` on record fields
+is confirmed exposed.
+
+**Chez-side:** confirm (or add, if missing) a CAS primitive on record
+fields — `$record-cas!` or similar. Grep `s/prims.ss` and
+`s/primdata.ss` for existing atomic ops. If none, add one as a small
+primdata entry wrapping the machine-level CAS the GC already uses
+for forwarding pointers.
+
+Effort: low. Risk: low. Gate: Chez-side CAS primitive audit.
+
+### Phase 32 — `agent` (async independent updates) — **LANDED (2026-04-24)**
+
+Implementation notes: `(std agent)` gains `await-for`,
+`set-error-handler!`, `set-error-mode!`, plus `agent-error-mode` /
+`agent-error-handler` accessors. `'continue` mode swallows errors
+after running the handler; `'fail` (default) latches as before.
+`await-for` polls a marker action with 5 ms tick steps. Works in
+both fiber and OS-thread modes. Tests: 36 passing in
+`tests/test-agent.ss`.
+
+**Surface:** `(agent init)`, `(send a fn args ...)`,
+`(send-off a fn args ...)`, `(await a ...)`, `(await-for ms a ...)`,
+`(agent-error a)`, `(restart-agent a v)`, `(set-error-handler! a fn)`,
+`(set-error-mode! a mode)`.
+
+**Semantics:** `send` uses a bounded CPU-sized pool (CPU-bound actions);
+`send-off` uses an unbounded pool (I/O-bound). Actions run serially
+*per agent* but concurrently across agents. Errors are latched —
+subsequent sends fail until `restart-agent` clears the error state.
+
+**Jerboa-side:** new `(std agent)` library on top of the existing
+thread infrastructure in `(std async)` / `(std actor)`. Worker pool
+with a work-stealing dequeue; per-agent mailbox queue (already solved
+in actor). Watchers reuse Phase 31's code path.
+
+**Chez-side:** none expected. If the pool contention becomes a
+bottleneck under load, revisit with a measured workload.
+
+Effort: medium. Risk: low. Gate: Phase 31 (shared watcher machinery).
+
+### Phase 33 — `ref` / `dosync` (software transactional memory) — **LANDED (2026-04-24)**
+
+Implementation notes: existing `(std stm)` already provided MVCC
+with per-TVar locks (`make-ref` / `dosync` / `alter` / `commute` /
+`ensure` / `ref-set` / `or-else` / `retry`). Round 5 adds `io!` —
+a syntax form that raises inside a transaction (via
+`*current-tx*` parameter check) and runs the body unguarded
+elsewhere. Tests: 17 passing in `tests/test-stm.ss` (13 prior + 4
+for `io!`). Known issue: the fiber runtime doesn't cleanly exit
+after the script finishes, but all tests pass.
+
+**Surface:** `(ref init)`, `(ref init :validator pred :min-history n)`,
+`(deref r)` / `@r`, `(ref-set! r v)`, `(alter r fn args ...)`,
+`(commute r fn args ...)`, `(ensure r)`, `(dosync body ...)`,
+`(io! body ...)` (marks body as non-retryable — throws inside dosync).
+
+**Semantics:** MVCC-style optimistic concurrency. Each ref carries a
+chained history of `(timestamp . value)`. A transaction records its
+read-set and write-set, validates the read-set against the current
+world-version on commit, and retries from scratch on conflict.
+`commute` relaxes ordering for commutative updates (reduces retries);
+`ensure` pins a read-only ref against concurrent writes.
+
+**Jerboa-side:** new `(std ref)` library. A global monotonic
+world-clock (fxincrement with store-store fence). Refs are records
+holding the current value plus a history ring (size configurable).
+Per-thread transaction state lives in a parameter. Commit path does
+the read-set version check under a shared RwLock; successful commits
+bump the world-clock.
+
+**Chez-side:** possibly a `$world-clock-increment!` primitive if the
+straight-Scheme implementation on `fx+` + a mutex shows as hot.
+Otherwise zero. Also: the reference implementation wants weak refs
+for the history ring to avoid retaining long-dead values — Chez
+already has `weak-pair` / `$weak-pair` machinery.
+
+Effort: high. Risk: medium — STM is classic but subtle (livelock
+avoidance, fairness under contention, GC pressure on history chains,
+starvation of long transactions).
+
+**Fallback plan:** if the full MVCC implementation slips, ship a
+"cheap dosync" — a single global RwLock around the whole body — and
+label it a correctness-only implementation. Replace with the MVCC
+version once a workload proves the contention. Users get the API
+and can start writing code against it; the switch is transparent.
+
+Gate: Phase 31 lands first so the project has a working concurrency
+primitive on trunk before STM's churn begins.
+
+### Phase 34 — `defprotocol` (polymorphic dispatch) — **LANDED (2026-04-24)**
+
+Implementation notes: `(std protocol)` gains `extenders` and
+`extends?`. `extenders` walks the `%dispatch` eq-hashtable and
+returns type-keys (rtds or symbols) that cover every method in the
+protocol; `extends?` is the equivalent check for a specific
+type-key. Tests: 39 passing in `tests/test-protocol.ss`.
+
+**Surface:** `(defprotocol IFoo (foo [self x]) (bar [self x y]))`,
+`(extend-type T IFoo (foo ...) (bar ...))`, `(extend-protocol IFoo T1
+(...) T2 (...))`, `(satisfies? IFoo x)`, `(extenders IFoo)` (list of
+RTDs), `(extends? T IFoo)`.
+
+**Semantics:** single-dispatch on the first argument's type. Types
+can extend protocols from *outside* the defining module — the key
+advantage over `defmethod` on a record. Missing implementations raise
+at call time with a clear error.
+
+**Jerboa-side:** new `(std protocol)` library. Each protocol function
+is a dispatch stub: look up `(type-of self) → impl` in a weak
+eq-hashtable keyed by RTD. Fast path: a per-call-site monomorphic
+inline cache (one slot holding `(RTD . impl-proc)`; miss falls back
+to the hashtable and refills). Cache invalidation fires when
+`extend-type` mutates the table — broadcast a generation counter and
+bump the per-cache epoch.
+
+**Chez-side:** this is where the Round 1 §3.3 "method-cache primitive"
+deferred work pays off. Ideally: add a `$record-dispatch` primitive
+that takes a record, a cache slot, and a fallback procedure, and
+atomically swaps the cache line on miss. If unavailable, stay
+100% in Scheme with a small per-callsite closure; profile before
+deciding.
+
+Effort: medium–high. Risk: medium. Gate: none (profile well
+alongside Phase 35).
+
+### Phase 35 — `defmulti` / `defmethod` (open multimethods) — **LANDED (2026-04-24)**
+
+Implementation notes: `(std multi)` gains a full hierarchy surface
+— `make-hierarchy`, `derive`, `underive`, `parents`, `ancestors`,
+`descendants`, `isa?`, `prefer-method`, `preferred-methods`, and a
+shared `global-hierarchy`. All public hierarchy ops are
+`case-lambda`d to default to the global hierarchy. Cycle detection
+rejects self-derives and transitive cycles via a `%isa?/locked`
+walk. Dispatch in `%invoke` now does a 3-step lookup: exact match
+→ hierarchy walk (with `prefer-method` disambiguation) → default.
+Tests: 45 passing in `tests/test-multi.ss` (24 prior + 21 new).
+
+**Surface:** `(defmulti f dispatch-fn)`, `(defmethod f dispatch-val
+(args ...) body)`, `(derive child parent)`, `(underive child parent)`,
+`(isa? h x y)`, `(parents h x)`, `(ancestors h x)`, `(descendants h
+x)`, `(prefer-method f v1 v2)`, `(make-hierarchy)`,
+`(remove-method f v)`, `(methods f)`.
+
+**Semantics:** dispatch value comes from an arbitrary function of
+args; method table keyed by dispatch values; `isa?` walks a
+user-defined hierarchy (defaults to `global-hierarchy`). Ambiguous
+matches raise; `prefer-method` tie-breaks.
+
+**Jerboa-side:** new `(std multimethod)` library. Smaller than
+protocols — no type-indexed cache needed; just a hashtable keyed by
+dispatch value plus the `derive` hierarchy graph. Memoize
+dispatch-value → method resolution so subsequent calls skip the
+hierarchy walk; invalidate memo on any `defmethod` or `derive`.
+
+**Chez-side:** none expected.
+
+Effort: low–medium. Risk: low. Gate: Phase 34 (share the epoch +
+cache-invalidation pattern).
+
+### Phase 36 — `spec` (data validation + generation) — **LANDED (2026-04-24)**
+
+Implementation notes: `(std spec)` gains `s-instrument`,
+`s-unstrument`, `s-instrumented?`. Instrumentation uses
+`top-level-value` / `set-top-level-value!` to wrap script-level
+procedures; library-interior bindings are not rewriteable this
+way, so instrumentation is a script-level tool. Fixed a
+pre-existing bug in the `s-fdef` macro that quoted spec
+expressions instead of evaluating them (rewrote as a
+`syntax-case` form that peels `:key spec` pairs). Tests: 44
+passing in `tests/test-spec.ss`.
+
+**Surface:** `(s/def ::name spec)`, `(s/valid? spec x)`,
+`(s/conform spec x)`, `(s/explain spec x)` / `(s/explain-data spec x)`,
+`(s/keys :req [...] :opt [...] :req-un [...] :opt-un [...])`,
+`(s/coll-of pred :kind :count :min-count :max-count :distinct)`,
+`(s/map-of k-spec v-spec)`, `(s/tuple s1 s2 ...)`,
+`(s/cat :tag spec ...)`, `(s/alt :tag spec ...)`, `(s/* spec)`,
+`(s/+ spec)`, `(s/? spec)`, `(s/or :tag pred ...)`, `(s/and pred ...)`,
+`(s/nilable spec)`, `(s/fdef fn :args :ret :fn)`,
+`(s/instrument sym)` / `(s/unstrument sym)`, `(s/gen spec)`.
+
+**Semantics:** spec is a predicate-with-conform — `conform` destructures
+the input into a tagged output on success, returns the sentinel
+`::invalid` on failure. `explain-data` returns a machine-readable
+failure report (path, predicate that failed, value). `fdef` + `instrument`
+give optional runtime arg/ret checking on named functions.
+
+**Jerboa-side:** new `(std spec)` library. Registry is a hashtable
+keyed by qualified keyword; specs are records with `conform-fn`,
+`explain-fn`, and (lazy) `gen-fn` slots. Generators are a separate
+`(std spec gen)` import so projects that don't need property-testing
+don't pay the generator-library cost.
+
+Generator library: small QuickCheck-style module exposing
+`(gen/fmap f g)`, `(gen/choose lo hi)`, `(gen/one-of gs)`,
+`(gen/such-that pred g)`, `(gen/vector g)`, `(gen/sample g n)`,
+`(gen/for-all spec prop)`. Roughly 300–500 lines of Scheme.
+
+**Chez-side:** none.
+
+Effort: medium. Risk: low — pure Scheme, no Chez changes, no
+concurrency. Gate: none.
+
+### Execution order (Round 5)
+
+| Phase | Item | Effort | Risk | Gate |
+|-------|------|--------|------|------|
+| 31 | atom | low | low | Chez CAS primitive audit |
+| 32 | agent | med | low | 31 (watchers) |
+| 33 | ref / dosync | high | med | 31 (ship one concurrency primitive first) |
+| 34 | defprotocol | med–high | med | none |
+| 35 | defmulti | low–med | low | 34 (shared cache machinery) |
+| 36 | spec | med | low | none |
+
+Phases 31, 34, 36 are independent and can ship in any order.
+31 → 32 → 33 is the concurrency ladder. 34 → 35 share method-table
+and cache-invalidation code. Recommended sequence when picking
+one at a time: **31 → 36 → 34 → 35 → 32 → 33** — ships the highest
+leverage-per-effort ratio first (atoms unlock immediate functional
+state management; spec hardens API boundaries with no runtime
+system surgery), parks STM for last since it's the one with
+"fall back to a global lock" written in its risk column.
+
+### Round 5 non-goals
+
+- **Distributed refs / network-aware agents.** Clojure has neither
+  out of the box; defer to a hypothetical `(std cluster)` round.
+- **core.async channels + `go` blocks.** Real value, but bigger than
+  one round — needs a CPS transform or a stackful-coroutine
+  scheduler. Track as Round 6 candidate if Phases 31–33 don't cover
+  the common cases users want from CSP.
+- **nREPL / connected-REPL protocol.** Tooling, not a language
+  feature; separate track. Jerboa already has `(std repl)`;
+  network-exposed REPL with editor integration is a jerboa-shell /
+  jerboa-emacs concern.
+- **Production observability (metrics / tracing / structured logs).**
+  Ecosystem work, not core language. A `(std telemetry)` library
+  with OpenTelemetry bindings would be a separate round driven by
+  a real deployment story.
+- **Transducers revisited.** Already shipped in `(std transducer)`;
+  Round 4 cookbook recipe `transducer-into-persistent-collections`
+  covers the composition idiom. No further work planned until a
+  benchmark shows a concrete gap.
+- **Datomic-style immutable DB.** Out of scope at the language level;
+  would be a standalone project on top of the STM + persistent
+  collections now in place.

@@ -1476,3 +1476,147 @@ system surgery), parks STM for last since it's the one with
 - **Datomic-style immutable DB.** Out of scope at the language level;
   would be a standalone project on top of the STM + persistent
   collections now in place.
+
+## Round 6 — Clojure-parity showcase (identified 2026-04-24)
+
+**Status (2026-04-24):** Phases 37 and 38 both **LANDED**. Phase 39
+remains optional / out of scope. The `make showcase` target in
+`jerboa-db` runs a 12-section end-to-end demo that exits 0.
+
+Rounds 1–5 closed every *library* gap for Clojure parity: persistent
+collections, Round 5 concurrency + polymorphism + spec, and the
+`jerboa-db` Datomic clone (which is also far more complete than its
+own README suggests — `not-join`, `variance`/`stddev`, `log`,
+`index-range`/`seek-datoms`, and stored `:db/fn` all already ship
+and pass tests). The remaining gap for *proving* parity is a single
+concrete demo application that exercises the surface in one place.
+
+### Phase 37 — `jerboa-db` documentation sync (trivial) **LANDED (2026-04-24)**
+
+Flipped six `❌ Missing` rows to `✅` in `jerboa-db/jerboa-db.md`
+(`not-join`, `variance`/`stddev-sample` aggregates, stored `:db/fn`,
+log API object, `index-range`, `seek-datoms`) and corrected the
+status header to "Core Datomic parity: complete; 37 core tests
+passing".
+
+---
+
+**Problem:** `jerboa-db/jerboa-db.md` flags `not-join`,
+`variance`/`stddev`, `log`, `index-range`/`seek-datoms`, and
+`:db/fn` as `❌ Missing`, but all five are implemented and covered
+by `tests/test-core.ss` (37/37 passing). Reading the README
+alone, a user would think the Datalog engine is more incomplete
+than it is and reach for a different tool.
+
+**Work:** Re-audit each `❌` / `🚧` entry in the feature tables.
+Promote completed items to ✅, leave genuinely stubbed items
+(schema migration, Parquet/CSV import) as 🚧 with notes on what
+`make test` already exercises.
+
+Effort: trivial. Risk: none.
+
+### Phase 38 — Clojure-parity showcase (bookstore) **LANDED (2026-04-24)**
+
+Shipped as `jerboa-db/examples/bookstore.ss` with `make showcase`.
+All 12 sections print and the script exits 0.
+
+Notes discovered while building:
+
+- `s-instrument` cannot rebind `def`-bound procedures when a script
+  is run via `--script`: `set-top-level-value!` has no effect on
+  the program's lexical bindings. The demo wraps the function
+  body with an explicit `s-valid?`/`s-explain-str` guard — that's
+  the pattern to cookbook. Candidate Round 7 follow-up: have
+  `s-fdef` emit a macro that wraps the `def`-bound procedure at
+  definition time so `--script` callers get the same ergonomics
+  as REPL users.
+- `s-cat` expects alternating `tag spec` pairs
+  (`(s-cat :isbn '::isbn :qty '::qty)`), not a bare list of
+  spec names.
+- `std multi` dispatch does NOT consult a hierarchy automatically
+  even when `(std multi)`'s own `derive` API is used. To get
+  Clojure-style `isa?`-aware dispatch the user must plumb
+  `ancestors` + `get-method` into their own dispatch function
+  (shown in section 9 of the demo). Candidate Round 7 follow-up:
+  teach `defmulti` to accept a `:hierarchy` keyword that rewrites
+  the dispatch call site to search ancestors before falling back.
+- `sleep`/`make-time` in the Jerboa prelude shadows the Chez
+  `make-time` with an `(h m s)` date-style form, so the common
+  `(sleep (make-time 'time-duration ns sec))` idiom fails at the
+  user level. The demo busy-spins on `current-time` instead. Real
+  fix is either (a) expose a `sleep-ms` wrapper in the prelude, or
+  (b) stop shadowing `make-time`. Tracked as future hardening.
+
+---
+
+**Original spec follows:**
+
+**Goal:** one self-contained script that hits every Clojure
+idiom Jerboa now supports, in a realistic shape a Clojure user
+would recognize. Uses `jerboa-db` as the system-of-record and
+Round 5 primitives for in-memory orchestration.
+
+**File:** `jerboa-db/examples/bookstore.ss` — new directory.
+Runs end-to-end with `scheme --libdirs <jerboa-db>/lib:<jerboa>/lib
+--script examples/bookstore.ss`. Every section is numbered and
+prints its output so the script doubles as a tour.
+
+**Surfaces exercised (checklist):**
+
+1. **Schema + transact (jerboa-db):** define a `Book`/`Author`/`Order`
+   schema with `:db.unique/identity`, `:db.type/ref`,
+   `:db/tupleAttrs`. Transact a seed dataset.
+2. **Datalog query (jerboa-db):** multi-clause query with
+   `:in` parameter + `not-join` + `variance` aggregate over
+   prices.
+3. **Pull + time-travel (jerboa-db):** pull an order with nested
+   book and author; then run the same pull through `as-of` to
+   show the order at an earlier transaction.
+4. **Persistent collections (`std collections`):** build an
+   in-memory category index as a `pmap` from the query result.
+5. **Atoms (`std misc atom`):** per-session cart keyed by user;
+   install a validator that rejects negative quantities.
+6. **STM (`std stm`):** `dosync` that decrements inventory and
+   appends to an audit log — both refs update atomically. Use
+   `io!` to demonstrate the guard.
+7. **Agents (`std agent`):** async email-receipt simulator.
+   Install an error handler; run one failing send; show
+   `await-for` timing out on a slow action.
+8. **Protocols (`std protocol`):** `Renderable` with one `render`
+   method; `extend-type` for `Book`, `Order`, `User` records.
+9. **Multimethods (`std multi`):** `handle-event` dispatching
+   on event type with a `derive` hierarchy for
+   `'order-placed` / `'order-cancelled` → `'order-event`.
+10. **Spec (`std spec`):** define a `pos-int` spec, `s-fdef`
+    `place-order`, `s-instrument` it at the top of the demo so
+    bad inputs raise with a readable message.
+11. **Transducers (`std transducer`):** one pipeline (`filter` +
+    `map` + `take`) composed against the seed book list.
+12. **Threading macros (prelude):** rewrite one of the above
+    with `->` / `->>` / `some->` for idiom coverage.
+
+**Output:** the script prints a labelled line per section
+(`[1] schema transacted ...`, `[2] variance query => ...`)
+so a reader scans the demo without running the REPL.
+
+**Acceptance:** the script exits 0; a grep over its output
+shows each of the 12 sections. Added to
+`jerboa-db/Makefile` as `make showcase`.
+
+Effort: medium (one session). Risk: low — every surface is
+already tested; this is integration-only.
+
+### Phase 39 — Optional: web skin for the showcase
+
+Out of scope for Round 6. If the demo needs a screenshot-able
+UI, layer `std net httpd` + `std net ring` + an HTMX page that
+renders the same bookstore with an `as-of` slider. Track as a
+follow-up; the plain-script showcase already demonstrates parity.
+
+### Round 6 execution order
+
+| # | Phase                           | Effort  | Risk | Gate          |
+|---|---------------------------------|---------|------|---------------|
+| 37| jerboa-db doc sync              | trivial | none | —             |
+| 38| bookstore showcase              | medium  | low  | 37 (clarity)  |
+| 39| web skin (optional)             | medium  | low  | 38            |

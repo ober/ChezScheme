@@ -140,6 +140,24 @@ Both procedures raise an exception if any argument is not a bytevector
 (or, for \scheme{bytevector-slice}, if \var{start}/\var{end} are not
 nonnegative fixnums or are out of range).
 
+\subsection{New \scheme{base64-encode} and \scheme{base64-decode}}
+
+Two new primitives in \scheme{(chezscheme)} implementing RFC 4648
+base64 encoding and decoding entirely in Scheme.
+
+\scheme{(base64-encode \var{bv})} encodes a bytevector as a padded
+base64 string using the standard alphabet.  Two optional arguments
+control encoding: \scheme{(base64-encode \var{bv} \var{url-safe?})}
+selects the URL- and filename-safe alphabet (\scheme{-} and \scheme{_}
+in place of \scheme{+} and \scheme{/}), and
+\scheme{(base64-encode \var{bv} \var{url-safe?} \var{pad?})}
+suppresses trailing \scheme{=} padding when \var{pad?} is false.
+
+\scheme{(base64-decode \var{string})} decodes a base64 string,
+accepting both the standard and URL-safe alphabets and tolerating
+missing or present padding.  An exception is raised on invalid
+characters or invalid effective length.
+
 \subsection{Specialized hashtable dispatch in type-recovery pass}
 
 The type-recovery pass now recognizes the sealed hashtable subtypes

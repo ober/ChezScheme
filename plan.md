@@ -2200,7 +2200,7 @@ existing changes meaning, every addition is a brand-new binding.
 Phases 65–68 are safe, useful, and unlock the rest. They land first.
 69+ get re-evaluated after the easy wins are in.
 
-### Phase 65 — `bytevector-slice` and `bytevector-append`
+### Phase 65 — `bytevector-slice` and `bytevector-append` — LANDED 2026-04-26
 
 **`(bytevector-slice bv start end)`** → fresh bytevector containing
 bytes `[start, end)` of `bv`.  Equivalent to `make-bytevector` +
@@ -2218,15 +2218,27 @@ length, allocates once, copies each input in.
 - `csug/objects.stex` — one-paragraph doc for each.
 - `release_notes/release_notes.stex` — one-line entries.
 
-### Phase 66 — `(chezscheme base64)` library
+### Phase 66 — `base64-encode` / `base64-decode` — LANDED 2026-04-26
 
-Pure-Scheme base64 encoder/decoder.  Exports:
-`bytevector->base64-string`, `base64-string->bytevector`,
-`base64-encode-port`, `base64-decode-port`.
+Two pure-Scheme primitives in `(chezscheme)`:
 
-Today jerboa calls `(std text base64)` (pure Scheme) but the
-WebSocket handshake bounces through `rust-random-bytes` for the
-key — once base64 is in core, the FFI hop disappears.
+- **`(base64-encode bv [url-safe? #f] [pad? #t])`** — RFC 4648 encoder.
+  Optional 2nd arg switches to the URL- and filename-safe alphabet
+  (`-` / `_` instead of `+` / `/`); optional 3rd arg suppresses
+  trailing `=` padding.
+- **`(base64-decode str)`** — RFC 4648 decoder.  Accepts both alphabets
+  and tolerates missing or present padding.  Raises an exception on
+  invalid characters or invalid effective length.
+
+Implementation lives at the bottom of `s/bytevector.ss` in a fresh
+`(let () ...)` block with two private helpers (`encode`, `decode`) and
+a 256-byte decode table.  Tests in `mats/bytevector.ms` cover the
+seven RFC 4648 vectors plus URL-safe alphabet, pad-less encoding,
+round-trip on a 256-byte bytevector, and three error cases.
+
+This shrinks jerboa's static-build dependency surface — `(std text
+base64)` becomes a thin wrapper over the Chez primitives instead of
+its own ~80-line implementation.
 
 ### Phase 67 — `(chezscheme hash sha1)` / `(chezscheme hash sha256)`
 

@@ -1621,6 +1621,51 @@ bytevector is returned.
 
 %----------------------------------------------------------------------------
 \entryheader
+\formdef{base64-encode}{\categoryprocedure}{(base64-encode \var{bytevector})}
+\formdef{base64-encode}{\categoryprocedure}{(base64-encode \var{bytevector} \var{url-safe?})}
+\formdef{base64-encode}{\categoryprocedure}{(base64-encode \var{bytevector} \var{url-safe?} \var{pad?})}
+\returns a base64-encoded string
+\listlibraries
+\endentryheader
+
+\noindent
+Encodes \var{bytevector} as a base64 string per RFC 4648.  When
+\var{url-safe?} is true, the URL- and filename-safe alphabet is used
+(\scheme{-} and \scheme{_} in place of \scheme{+} and \scheme{/}).
+When \var{pad?} is false, trailing \scheme{=} padding is omitted.  Both
+optional arguments default to the standard alphabet with padding.
+
+\schemedisplay
+(base64-encode (string->utf8 "foobar"))     ;=> "Zm9vYmFy"
+(base64-encode (string->utf8 "f"))          ;=> "Zg=="
+(base64-encode '#vu8(#xff #xff #xff) #t)    ;=> "____"
+(base64-encode (string->utf8 "f") #f #f)    ;=> "Zg"
+\endschemedisplay
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{base64-decode}{\categoryprocedure}{(base64-decode \var{string})}
+\returns a fresh bytevector containing the decoded bytes
+\listlibraries
+\endentryheader
+
+\noindent
+Decodes a base64 string per RFC 4648.  Both the standard alphabet
+(\scheme{+}, \scheme{/}) and the URL- and filename-safe alphabet
+(\scheme{-}, \scheme{_}) are accepted.  Trailing \scheme{=} padding is
+optional.  An exception is raised if \var{string} contains a character
+outside the union of these alphabets, or if its length (excluding
+padding) is congruent to 1 modulo 4.
+
+\schemedisplay
+(base64-decode "Zm9vYmFy") ;=> #vu8(102 111 111 98 97 114)
+(base64-decode "Zg==")     ;=> #vu8(102)
+(base64-decode "Zg")       ;=> #vu8(102)
+(base64-decode "____")     ;=> #vu8(255 255 255)
+\endschemedisplay
+
+%----------------------------------------------------------------------------
+\entryheader
 \formdef{bytevector-truncate!}{\categoryprocedure}{(bytevector-truncate! \var{bytevector} \var{n})}
 \returns \var{bytevector} or the empty bytevector
 \listlibraries

@@ -11426,3 +11426,54 @@
   (error? (bytevector-append "abc"))
   (error? (bytevector-append '#vu8() 17 '#vu8()))
 )
+
+(mat base64-encode
+  ;; RFC 4648 test vectors
+  (equal? (base64-encode (string->utf8 ""))       "")
+  (equal? (base64-encode (string->utf8 "f"))      "Zg==")
+  (equal? (base64-encode (string->utf8 "fo"))     "Zm8=")
+  (equal? (base64-encode (string->utf8 "foo"))    "Zm9v")
+  (equal? (base64-encode (string->utf8 "foob"))   "Zm9vYg==")
+  (equal? (base64-encode (string->utf8 "fooba"))  "Zm9vYmE=")
+  (equal? (base64-encode (string->utf8 "foobar")) "Zm9vYmFy")
+  ;; full 256-byte alphabet round-trip
+  (let ([bv (u8-list->bytevector
+              (let loop ([i 0]) (if (fx= i 256) '() (cons i (loop (fx+ i 1))))))])
+    (equal? (base64-decode (base64-encode bv)) bv))
+  ;; URL-safe alphabet — no '+' or '/'
+  (equal? (base64-encode '#vu8(#xff #xff #xff))     "////")
+  (equal? (base64-encode '#vu8(#xff #xff #xff) #t)  "____")
+  (equal? (base64-encode '#vu8(#xfb #xff #xbf))     "+/+/")
+  (equal? (base64-encode '#vu8(#xfb #xff #xbf) #t)  "-_-_")
+  ;; pad? = #f drops trailing '='
+  (equal? (base64-encode (string->utf8 "f")  #f #f) "Zg")
+  (equal? (base64-encode (string->utf8 "fo") #f #f) "Zm8")
+  (equal? (base64-encode (string->utf8 "foob") #t #f) "Zm9vYg")
+  ;; bad arg
+  (error? (base64-encode 'not-a-bv))
+  (error? (base64-encode "string"))
+)
+
+(mat base64-decode
+  (equal? (base64-decode "")          '#vu8())
+  (equal? (base64-decode "Zg==")      (string->utf8 "f"))
+  (equal? (base64-decode "Zm8=")      (string->utf8 "fo"))
+  (equal? (base64-decode "Zm9v")      (string->utf8 "foo"))
+  (equal? (base64-decode "Zm9vYg==")  (string->utf8 "foob"))
+  (equal? (base64-decode "Zm9vYmE=")  (string->utf8 "fooba"))
+  (equal? (base64-decode "Zm9vYmFy")  (string->utf8 "foobar"))
+  ;; padding-less input accepted
+  (equal? (base64-decode "Zg")        (string->utf8 "f"))
+  (equal? (base64-decode "Zm8")       (string->utf8 "fo"))
+  (equal? (base64-decode "Zm9vYg")    (string->utf8 "foob"))
+  ;; URL-safe alphabet decodes
+  (equal? (base64-decode "____") '#vu8(#xff #xff #xff))
+  (equal? (base64-decode "-_-_") '#vu8(#xfb #xff #xbf))
+  ;; round-trip
+  (let ([bv '#vu8(0 1 2 3 250 251 252 253 254 255 17 42 99)])
+    (equal? (base64-decode (base64-encode bv)) bv))
+  ;; bad input
+  (error? (base64-decode 'not-a-string))
+  (error? (base64-decode "a"))      ; length 1 → invalid
+  (error? (base64-decode "ab*d"))   ; '*' is not in alphabet
+)

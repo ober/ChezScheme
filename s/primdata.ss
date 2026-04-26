@@ -1165,6 +1165,8 @@
   (asinh [sig [(number) -> (number)]] [flags arith-op mifoldable discard])
   (atanh [sig [(number) -> (number)]] [flags arith-op mifoldable discard])
   (atom? [sig [(ptr) -> (boolean)]] [flags pure unrestricted mifoldable discard])
+  (base64-decode [sig [(string) -> (bytevector)]] [flags alloc])
+  (base64-encode [sig [(bytevector) (bytevector ptr) (bytevector ptr ptr) -> (string)]] [flags alloc])
   (bignum? [sig [(ptr) -> (boolean)]] [pred bignum] [flags pure unrestricted cp02])
   (binary-port-input-buffer [sig [(binary-input-port) -> (bytevector)]] [flags discard])
   (binary-port-input-count [sig [(binary-input-port) -> (length)]] [flags discard true])

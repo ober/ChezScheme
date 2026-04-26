@@ -1601,4 +1601,137 @@
                  [fmt (logand tag (fx- (fxsll 1 (constant COMPRESS-FORMAT-BITS)) 1))]
                  [dest-length (bitwise-arithmetic-shift-right tag (constant COMPRESS-FORMAT-BITS))])
             (uncompress who bv dest-length fmt uncompressed-length-length (fx- (bytevector-length bv) uncompressed-length-length)))))))
+
+  (let ()
+    (define std-alphabet
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+    (define url-alphabet
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+    (define-syntax pad-char (identifier-syntax #\=))
+    (define (sentinel) -1)
+    (define decode-table
+      (let ([t (make-bytevector 256 #xff)])
+        (let loop ([i 0])
+          (when (fx< i 64)
+            (bytevector-u8-set! t (char->integer (string-ref std-alphabet i)) i)
+            (loop (fx+ i 1))))
+        ;; URL-safe extras: '-' = 62, '_' = 63
+        (bytevector-u8-set! t (char->integer #\-) 62)
+        (bytevector-u8-set! t (char->integer #\_) 63)
+        t))
+    (define (lookup-decode c who src)
+      (let ([i (char->integer c)])
+        (if (fx< i 256)
+            (let ([v (bytevector-u8-ref decode-table i)])
+              (if (fx= v #xff)
+                  ($oops who "invalid base64 character ~s in ~s" c src)
+                  v))
+            ($oops who "invalid base64 character ~s in ~s" c src))))
+    (define (encode bv alphabet pad? who)
+      (unless (bytevector? bv) (not-a-bytevector who bv))
+      (let* ([n (bytevector-length bv)]
+             [whole (fxquotient n 3)]
+             [rem (fx- n (fx* whole 3))]
+             [out-len (cond
+                        [pad? (fx* (fxquotient (fx+ n 2) 3) 4)]
+                        [(fx= rem 0) (fx* whole 4)]
+                        [(fx= rem 1) (fx+ (fx* whole 4) 2)]
+                        [else        (fx+ (fx* whole 4) 3)])]
+             [out (make-string out-len)])
+        (let loop ([i 0] [j 0])
+          (cond
+            [(fx= i (fx* whole 3))
+             (cond
+               [(fx= rem 1)
+                (let ([b0 (bytevector-u8-ref bv i)])
+                  (string-set! out j (string-ref alphabet (fxsrl b0 2)))
+                  (string-set! out (fx+ j 1) (string-ref alphabet (fxand (fxsll b0 4) #x3f)))
+                  (when pad?
+                    (string-set! out (fx+ j 2) pad-char)
+                    (string-set! out (fx+ j 3) pad-char)))]
+               [(fx= rem 2)
+                (let ([b0 (bytevector-u8-ref bv i)]
+                      [b1 (bytevector-u8-ref bv (fx+ i 1))])
+                  (string-set! out j (string-ref alphabet (fxsrl b0 2)))
+                  (string-set! out (fx+ j 1)
+                    (string-ref alphabet
+                      (fxior (fxand (fxsll b0 4) #x3f) (fxsrl b1 4))))
+                  (string-set! out (fx+ j 2)
+                    (string-ref alphabet (fxand (fxsll b1 2) #x3f)))
+                  (when pad?
+                    (string-set! out (fx+ j 3) pad-char)))])
+             out]
+            [else
+             (let ([b0 (bytevector-u8-ref bv i)]
+                   [b1 (bytevector-u8-ref bv (fx+ i 1))]
+                   [b2 (bytevector-u8-ref bv (fx+ i 2))])
+               (string-set! out j (string-ref alphabet (fxsrl b0 2)))
+               (string-set! out (fx+ j 1)
+                 (string-ref alphabet
+                   (fxior (fxand (fxsll b0 4) #x3f) (fxsrl b1 4))))
+               (string-set! out (fx+ j 2)
+                 (string-ref alphabet
+                   (fxior (fxand (fxsll b1 2) #x3f) (fxsrl b2 6))))
+               (string-set! out (fx+ j 3) (string-ref alphabet (fxand b2 #x3f)))
+               (loop (fx+ i 3) (fx+ j 4)))]))))
+    (define (effective-length s who)
+      (let ([n (string-length s)])
+        (cond
+          [(fx= n 0) 0]
+          [(and (fx>= n 2)
+                (char=? (string-ref s (fx- n 1)) pad-char)
+                (char=? (string-ref s (fx- n 2)) pad-char))
+           (fx- n 2)]
+          [(char=? (string-ref s (fx- n 1)) pad-char)
+           (fx- n 1)]
+          [else n])))
+    (define (decode s who)
+      (unless (string? s) ($oops who "~s is not a string" s))
+      (let ([eff (effective-length s who)])
+        (let ([rem (fxremainder eff 4)])
+          (when (fx= rem 1)
+            ($oops who "invalid base64 string length ~s" s))
+          (let* ([groups (fxquotient eff 4)]
+                 [tail-extra (cond [(fx= rem 0) 0] [(fx= rem 2) 1] [else 2])]
+                 [out-len (fx+ (fx* groups 3) tail-extra)]
+                 [out (make-bytevector out-len)])
+            (let loop ([si 0] [oi 0])
+              (cond
+                [(fx= si (fx* groups 4))
+                 (cond
+                   [(fx= rem 2)
+                    (let ([c0 (lookup-decode (string-ref s si) who s)]
+                          [c1 (lookup-decode (string-ref s (fx+ si 1)) who s)])
+                      (bytevector-u8-set! out oi
+                        (fxior (fxsll c0 2) (fxsrl c1 4))))]
+                   [(fx= rem 3)
+                    (let ([c0 (lookup-decode (string-ref s si) who s)]
+                          [c1 (lookup-decode (string-ref s (fx+ si 1)) who s)]
+                          [c2 (lookup-decode (string-ref s (fx+ si 2)) who s)])
+                      (bytevector-u8-set! out oi
+                        (fxior (fxsll c0 2) (fxsrl c1 4)))
+                      (bytevector-u8-set! out (fx+ oi 1)
+                        (fxand (fxior (fxsll c1 4) (fxsrl c2 2)) #xff)))])
+                 out]
+                [else
+                 (let ([c0 (lookup-decode (string-ref s si) who s)]
+                       [c1 (lookup-decode (string-ref s (fx+ si 1)) who s)]
+                       [c2 (lookup-decode (string-ref s (fx+ si 2)) who s)]
+                       [c3 (lookup-decode (string-ref s (fx+ si 3)) who s)])
+                   (bytevector-u8-set! out oi
+                     (fxior (fxsll c0 2) (fxsrl c1 4)))
+                   (bytevector-u8-set! out (fx+ oi 1)
+                     (fxand (fxior (fxsll c1 4) (fxsrl c2 2)) #xff))
+                   (bytevector-u8-set! out (fx+ oi 2)
+                     (fxand (fxior (fxsll c2 6) c3) #xff))
+                   (loop (fx+ si 4) (fx+ oi 3)))]))))))
+    (set-who! base64-encode
+      (case-lambda
+        [(bv) (encode bv std-alphabet #t who)]
+        [(bv url-safe?)
+         (encode bv (if url-safe? url-alphabet std-alphabet) #t who)]
+        [(bv url-safe? pad?)
+         (encode bv (if url-safe? url-alphabet std-alphabet) (and pad? #t) who)]))
+    (set-who! base64-decode
+      (lambda (s) (decode s who))))
 )

@@ -1666,6 +1666,38 @@ padding) is congruent to 1 modulo 4.
 
 %----------------------------------------------------------------------------
 \entryheader
+\formdef{sha1-bytevector}{\categoryprocedure}{(sha1-bytevector \var{bytevector})}
+\returns a fresh 20-byte bytevector containing the SHA-1 digest of \var{bytevector}
+\listlibraries
+\endentryheader
+
+\noindent
+Computes the SHA-1 (FIPS 180-4) digest of \var{bytevector} and
+returns it as a freshly-allocated 20-byte bytevector.
+
+\schemedisplay
+(sha1-bytevector (string->utf8 "abc"))
+;=> #vu8(169 153 62 54 71 6 129 106 186 62 37 113 120 80 194 108 156 208 216 157)
+\endschemedisplay
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{sha256-bytevector}{\categoryprocedure}{(sha256-bytevector \var{bytevector})}
+\returns a fresh 32-byte bytevector containing the SHA-256 digest of \var{bytevector}
+\listlibraries
+\endentryheader
+
+\noindent
+Computes the SHA-256 (FIPS 180-4) digest of \var{bytevector} and
+returns it as a freshly-allocated 32-byte bytevector.
+
+\schemedisplay
+(sha256-bytevector (string->utf8 ""))
+;=> a 32-byte bytevector starting with 227 176 196 66 ...
+\endschemedisplay
+
+%----------------------------------------------------------------------------
+\entryheader
 \formdef{bytevector-truncate!}{\categoryprocedure}{(bytevector-truncate! \var{bytevector} \var{n})}
 \returns \var{bytevector} or the empty bytevector
 \listlibraries

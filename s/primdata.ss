@@ -1731,6 +1731,8 @@
   (set-virtual-register! [sig [(sub-index ptr) -> (void)]] [flags true])
   (set-wrapper-procedure-procedure! [sig [(ptr procedure) -> (void)]] [flags true])
   (set-wrapper-procedure-data! [sig [(ptr ptr) -> (void)]] [flags true])
+  (sha1-bytevector [sig [(bytevector) -> (bytevector)]] [flags alloc])
+  (sha256-bytevector [sig [(bytevector) -> (bytevector)]] [flags alloc])
   (sinh [sig [(number) -> (number)]] [flags arith-op mifoldable discard])
   (sleep [sig [(time) -> (void)]] [flags true])
   (sort [sig [(procedure list) -> (list)]] [flags true])

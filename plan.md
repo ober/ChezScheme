@@ -2240,13 +2240,19 @@ This shrinks jerboa's static-build dependency surface — `(std text
 base64)` becomes a thin wrapper over the Chez primitives instead of
 its own ~80-line implementation.
 
-### Phase 67 — `(chezscheme hash sha1)` / `(chezscheme hash sha256)`
+### Phase 67 — `sha1-bytevector` / `sha256-bytevector` — LANDED 2026-04-26
 
-Pure-Scheme SHA-1 and SHA-256.  Exports `sha1-bytevector`,
-`sha1-port`, `sha256-bytevector`, `sha256-port`.
+Pure-Scheme SHA-1 and SHA-256, exposed as primitives in `(chezscheme)`:
 
-Drops `rust-sha1` from `(std net websocket)` — a static-built jerboa
-no longer needs the Rust shim just for the WebSocket handshake.
+- `(sha1-bytevector bv)` — returns a 20-byte digest (FIPS 180-4).
+- `(sha256-bytevector bv)` — returns a 32-byte digest (FIPS 180-4).
+
+Both implementations live in `s/bytevector.ss` and use only existing
+bitwise/fixnum primitives — no C code, no FFI.  Verified against the
+canonical FIPS 180-2 test vectors plus padding-boundary cases (55 and
+56 byte inputs).  Drops `rust-sha1` from `(std net websocket)`: a
+statically built jerboa no longer needs the Rust shim just for the
+WebSocket handshake.
 
 ### Phase 68 — `ordered-hashtable`
 

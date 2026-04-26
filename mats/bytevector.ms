@@ -11477,3 +11477,61 @@
   (error? (base64-decode "a"))      ; length 1 → invalid
   (error? (base64-decode "ab*d"))   ; '*' is not in alphabet
 )
+
+(mat sha1-bytevector
+  (begin
+    (define (bv->hex bv)
+      (let* ([n (bytevector-length bv)]
+             [out (make-string (fx* n 2))]
+             [hex "0123456789abcdef"])
+        (do ([i 0 (fx+ i 1)]) ((fx= i n) out)
+          (let ([b (bytevector-u8-ref bv i)])
+            (string-set! out (fx*  i 2)        (string-ref hex (fxsrl b 4)))
+            (string-set! out (fx+ (fx* i 2) 1) (string-ref hex (fxand b 15)))))))
+    #t)
+  ;; FIPS 180-1 Appendix A test vectors
+  (equal? (bv->hex (sha1-bytevector (string->utf8 "")))
+          "da39a3ee5e6b4b0d3255bfef95601890afd80709")
+  (equal? (bv->hex (sha1-bytevector (string->utf8 "abc")))
+          "a9993e364706816aba3e25717850c26c9cd0d89d")
+  (equal? (bv->hex (sha1-bytevector
+            (string->utf8
+              "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")))
+          "84983e441c3bd26ebaae4aa1f95129e5e54670f1")
+  ;; one full block boundary case (55 bytes triggers extra padding block)
+  (equal? (bv->hex (sha1-bytevector
+            (string->utf8 (make-string 55 #\a))))
+          "c1c8bbdc22796e28c0e15163d20899b65621d65a")
+  (equal? (bv->hex (sha1-bytevector
+            (string->utf8 (make-string 56 #\a))))
+          "c2db330f6083854c99d4b5bfb6e8f29f201be699")
+  ;; output length is exactly 20 bytes
+  (eqv? (bytevector-length (sha1-bytevector '#vu8())) 20)
+  (eqv? (bytevector-length (sha1-bytevector '#vu8(1 2 3 4 5))) 20)
+  ;; bad arg
+  (error? (sha1-bytevector "not a bytevector"))
+  (error? (sha1-bytevector 'foo))
+)
+
+(mat sha256-bytevector
+  ;; FIPS 180-2 test vectors
+  (equal? (bv->hex (sha256-bytevector (string->utf8 "")))
+          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+  (equal? (bv->hex (sha256-bytevector (string->utf8 "abc")))
+          "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+  (equal? (bv->hex (sha256-bytevector
+            (string->utf8
+              "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")))
+          "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+  ;; padding boundary: 55 → fits in one block, 56 → forces extra block
+  (equal? (bv->hex (sha256-bytevector (string->utf8 (make-string 55 #\a))))
+          "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318")
+  (equal? (bv->hex (sha256-bytevector (string->utf8 (make-string 56 #\a))))
+          "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a")
+  ;; output length is exactly 32 bytes
+  (eqv? (bytevector-length (sha256-bytevector '#vu8())) 32)
+  (eqv? (bytevector-length (sha256-bytevector '#vu8(1 2 3 4 5))) 32)
+  ;; bad arg
+  (error? (sha256-bytevector "not a bytevector"))
+  (error? (sha256-bytevector 'foo))
+)

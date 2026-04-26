@@ -1734,4 +1734,176 @@
          (encode bv (if url-safe? url-alphabet std-alphabet) (and pad? #t) who)]))
     (set-who! base64-decode
       (lambda (s) (decode s who))))
+
+  (let ()
+    (define-syntax m32
+      (syntax-rules () [(_ e) (bitwise-and e #xffffffff)]))
+    (define (u32+ . args) (m32 (apply + args)))
+    (define (rotl32 x n)
+      (let ([x (m32 x)])
+        (m32 (bitwise-ior
+               (bitwise-arithmetic-shift-left x n)
+               (bitwise-arithmetic-shift-right x (fx- 32 n))))))
+    (define (rotr32 x n)
+      (let ([x (m32 x)])
+        (bitwise-ior (bitwise-arithmetic-shift-right x n)
+                     (m32 (bitwise-arithmetic-shift-left x (fx- 32 n))))))
+    (define (shr32 x n)
+      (bitwise-arithmetic-shift-right (m32 x) n))
+    (define (u32-be-ref bv i)
+      (bitwise-ior
+        (bitwise-arithmetic-shift-left (bytevector-u8-ref bv i) 24)
+        (bitwise-arithmetic-shift-left (bytevector-u8-ref bv (fx+ i 1)) 16)
+        (bitwise-arithmetic-shift-left (bytevector-u8-ref bv (fx+ i 2)) 8)
+        (bytevector-u8-ref bv (fx+ i 3))))
+    (define (u32-be-set! bv i v)
+      (bytevector-u8-set! bv i        (bitwise-and (bitwise-arithmetic-shift-right v 24) #xff))
+      (bytevector-u8-set! bv (fx+ i 1) (bitwise-and (bitwise-arithmetic-shift-right v 16) #xff))
+      (bytevector-u8-set! bv (fx+ i 2) (bitwise-and (bitwise-arithmetic-shift-right v  8) #xff))
+      (bytevector-u8-set! bv (fx+ i 3) (bitwise-and v #xff)))
+    (define (pad-sha bv)
+      (let* ([n (bytevector-length bv)]
+             [bits (* n 8)]
+             [pad-len (let ([r (fxremainder (fx+ n 9) 64)])
+                        (if (fx= r 0) 0 (fx- 64 r)))]
+             [total (fx+ n 9 pad-len)]
+             [out (make-bytevector total 0)])
+        (#3%bytevector-copy! bv 0 out 0 n)
+        (bytevector-u8-set! out n #x80)
+        (let loop ([i 0])
+          (when (fx< i 8)
+            (bytevector-u8-set! out (fx- total 1 i)
+              (bitwise-and (bitwise-arithmetic-shift-right bits (fx* i 8)) #xff))
+            (loop (fx+ i 1))))
+        out))
+
+    (define sha256-K
+      '#(#x428a2f98 #x71374491 #xb5c0fbcf #xe9b5dba5 #x3956c25b #x59f111f1 #x923f82a4 #xab1c5ed5
+         #xd807aa98 #x12835b01 #x243185be #x550c7dc3 #x72be5d74 #x80deb1fe #x9bdc06a7 #xc19bf174
+         #xe49b69c1 #xefbe4786 #x0fc19dc6 #x240ca1cc #x2de92c6f #x4a7484aa #x5cb0a9dc #x76f988da
+         #x983e5152 #xa831c66d #xb00327c8 #xbf597fc7 #xc6e00bf3 #xd5a79147 #x06ca6351 #x14292967
+         #x27b70a85 #x2e1b2138 #x4d2c6dfc #x53380d13 #x650a7354 #x766a0abb #x81c2c92e #x92722c85
+         #xa2bfe8a1 #xa81a664b #xc24b8b70 #xc76c51a3 #xd192e819 #xd6990624 #xf40e3585 #x106aa070
+         #x19a4c116 #x1e376c08 #x2748774c #x34b0bcb5 #x391c0cb3 #x4ed8aa4a #x5b9cca4f #x682e6ff3
+         #x748f82ee #x78a5636f #x84c87814 #x8cc70208 #x90befffa #xa4506ceb #xbef9a3f7 #xc67178f2))
+
+    (set-who! sha1-bytevector
+      (lambda (bv)
+        (unless (bytevector? bv) (not-a-bytevector who bv))
+        (let* ([padded (pad-sha bv)]
+               [plen (bytevector-length padded)]
+               [H (vector #x67452301 #xEFCDAB89 #x98BADCFE #x10325476 #xC3D2E1F0)]
+               [W (make-vector 80 0)])
+          (let block-loop ([off 0])
+            (when (fx< off plen)
+              (let load ([i 0])
+                (when (fx< i 16)
+                  (vector-set! W i (u32-be-ref padded (fx+ off (fx* i 4))))
+                  (load (fx+ i 1))))
+              (let expand ([i 16])
+                (when (fx< i 80)
+                  (vector-set! W i
+                    (rotl32 (bitwise-xor (vector-ref W (fx- i 3))
+                                         (vector-ref W (fx- i 8))
+                                         (vector-ref W (fx- i 14))
+                                         (vector-ref W (fx- i 16)))
+                            1))
+                  (expand (fx+ i 1))))
+              (let round ([i 0]
+                          [a (vector-ref H 0)] [b (vector-ref H 1)]
+                          [c (vector-ref H 2)] [d (vector-ref H 3)]
+                          [e (vector-ref H 4)])
+                (cond
+                  [(fx= i 80)
+                   (vector-set! H 0 (u32+ (vector-ref H 0) a))
+                   (vector-set! H 1 (u32+ (vector-ref H 1) b))
+                   (vector-set! H 2 (u32+ (vector-ref H 2) c))
+                   (vector-set! H 3 (u32+ (vector-ref H 3) d))
+                   (vector-set! H 4 (u32+ (vector-ref H 4) e))]
+                  [else
+                   (let-values
+                       ([(f k)
+                         (cond
+                           [(fx< i 20)
+                            (values (bitwise-ior (bitwise-and b c)
+                                                 (bitwise-and (bitwise-xor b #xffffffff) d))
+                                    #x5A827999)]
+                           [(fx< i 40)
+                            (values (bitwise-xor b c d) #x6ED9EBA1)]
+                           [(fx< i 60)
+                            (values (bitwise-ior (bitwise-and b c)
+                                                 (bitwise-and b d)
+                                                 (bitwise-and c d))
+                                    #x8F1BBCDC)]
+                           [else
+                            (values (bitwise-xor b c d) #xCA62C1D6)])])
+                     (let ([temp (u32+ (rotl32 a 5) f e k (vector-ref W i))])
+                       (round (fx+ i 1) temp a (rotl32 b 30) c d)))]))
+              (block-loop (fx+ off 64))))
+          (let ([out (make-bytevector 20)])
+            (let emit ([i 0])
+              (when (fx< i 5)
+                (u32-be-set! out (fx* i 4) (vector-ref H i))
+                (emit (fx+ i 1))))
+            out))))
+
+    (set-who! sha256-bytevector
+      (lambda (bv)
+        (unless (bytevector? bv) (not-a-bytevector who bv))
+        (let* ([padded (pad-sha bv)]
+               [plen (bytevector-length padded)]
+               [H (vector #x6a09e667 #xbb67ae85 #x3c6ef372 #xa54ff53a
+                          #x510e527f #x9b05688c #x1f83d9ab #x5be0cd19)]
+               [W (make-vector 64 0)])
+          (let block-loop ([off 0])
+            (when (fx< off plen)
+              (let load ([i 0])
+                (when (fx< i 16)
+                  (vector-set! W i (u32-be-ref padded (fx+ off (fx* i 4))))
+                  (load (fx+ i 1))))
+              (let expand ([i 16])
+                (when (fx< i 64)
+                  (let* ([w15 (vector-ref W (fx- i 15))]
+                         [w2  (vector-ref W (fx- i 2))]
+                         [s0  (bitwise-xor (rotr32 w15 7) (rotr32 w15 18) (shr32 w15 3))]
+                         [s1  (bitwise-xor (rotr32 w2 17) (rotr32 w2 19) (shr32 w2 10))])
+                    (vector-set! W i
+                      (u32+ (vector-ref W (fx- i 16)) s0
+                            (vector-ref W (fx- i 7))  s1)))
+                  (expand (fx+ i 1))))
+              (let round ([i 0]
+                          [a (vector-ref H 0)] [b (vector-ref H 1)]
+                          [c (vector-ref H 2)] [d (vector-ref H 3)]
+                          [e (vector-ref H 4)] [f (vector-ref H 5)]
+                          [g (vector-ref H 6)] [h (vector-ref H 7)])
+                (cond
+                  [(fx= i 64)
+                   (vector-set! H 0 (u32+ (vector-ref H 0) a))
+                   (vector-set! H 1 (u32+ (vector-ref H 1) b))
+                   (vector-set! H 2 (u32+ (vector-ref H 2) c))
+                   (vector-set! H 3 (u32+ (vector-ref H 3) d))
+                   (vector-set! H 4 (u32+ (vector-ref H 4) e))
+                   (vector-set! H 5 (u32+ (vector-ref H 5) f))
+                   (vector-set! H 6 (u32+ (vector-ref H 6) g))
+                   (vector-set! H 7 (u32+ (vector-ref H 7) h))]
+                  [else
+                   (let* ([S1 (bitwise-xor (rotr32 e 6) (rotr32 e 11) (rotr32 e 25))]
+                          [ch (bitwise-xor (bitwise-and e f)
+                                           (bitwise-and (bitwise-xor e #xffffffff) g))]
+                          [t1 (u32+ h S1 ch (vector-ref sha256-K i) (vector-ref W i))]
+                          [S0 (bitwise-xor (rotr32 a 2) (rotr32 a 13) (rotr32 a 22))]
+                          [mj (bitwise-xor (bitwise-and a b)
+                                           (bitwise-and a c)
+                                           (bitwise-and b c))]
+                          [t2 (u32+ S0 mj)])
+                     (round (fx+ i 1)
+                            (u32+ t1 t2) a b c
+                            (u32+ d t1) e f g))]))
+              (block-loop (fx+ off 64))))
+          (let ([out (make-bytevector 32)])
+            (let emit ([i 0])
+              (when (fx< i 8)
+                (u32-be-set! out (fx* i 4) (vector-ref H i))
+                (emit (fx+ i 1))))
+            out)))))
 )

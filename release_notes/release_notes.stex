@@ -158,6 +158,21 @@ accepting both the standard and URL-safe alphabets and tolerating
 missing or present padding.  An exception is raised on invalid
 characters or invalid effective length.
 
+\subsection{New \scheme{sha1-bytevector} and \scheme{sha256-bytevector}}
+
+Two pure-Scheme cryptographic-hash primitives in \scheme{(chezscheme)}:
+
+\scheme{(sha1-bytevector \var{bv})} returns a freshly allocated 20-byte
+bytevector containing the SHA-1 digest of \var{bv}.
+
+\scheme{(sha256-bytevector \var{bv})} returns a freshly allocated
+32-byte bytevector containing the SHA-256 digest of \var{bv}.
+
+Both are full FIPS 180-4 implementations written entirely in Scheme.
+They are intended for protocol use (WebSocket key handshake, content
+addressing, fingerprinting); for new applications requiring secure
+hashing, prefer SHA-256.
+
 \subsection{Specialized hashtable dispatch in type-recovery pass}
 
 The type-recovery pass now recognizes the sealed hashtable subtypes

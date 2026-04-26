@@ -782,6 +782,37 @@
        ; whew!
         (#3%bytevector-copy! v1 i1 v2 i2 k))))
 
+  (set-who! bytevector-slice
+    (lambda (v start end)
+      (unless (bytevector? v) (not-a-bytevector who v))
+      (let ([n (bytevector-length v)])
+        (unless (and (fixnum? start) (fx>= start 0))
+          ($oops who "invalid start value ~s" start))
+        (unless (and (fixnum? end) (fx>= end start))
+          ($oops who "invalid end value ~s" end))
+        (unless (fx<= end n)
+          ($oops who "end ~s is beyond the end of ~s" end v))
+        (let* ([k (fx- end start)] [v2 (make-bytevector k)])
+          (#3%bytevector-copy! v start v2 0 k)
+          v2))))
+
+  (set-who! bytevector-append
+    (lambda bvs
+      (let loop ([bs bvs] [total 0])
+        (cond
+          [(null? bs)
+           (let ([out (make-bytevector total)])
+             (let fill ([bs bvs] [pos 0])
+               (cond
+                 [(null? bs) out]
+                 [else
+                  (let ([k (bytevector-length (car bs))])
+                    (#3%bytevector-copy! (car bs) 0 out pos k)
+                    (fill (cdr bs) (fx+ pos k)))])))]
+          [(bytevector? (car bs))
+           (loop (cdr bs) (fx+ total (bytevector-length (car bs))))]
+          [else (not-a-bytevector who (car bs))]))))
+
   (set-who! bytevector->immutable-bytevector
     (lambda (v)
       (cond

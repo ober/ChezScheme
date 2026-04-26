@@ -2157,3 +2157,102 @@ The most useful next bets after Round 11:
    as opaque equal? leaves. Walking record fields (when both sides share
    an rtd) would close the parity gap with `clojure.data`.
 
+## Round 12 — Chez-side additions for jerboa (2026-04-26)
+
+This round shifts focus from the jerboa repo to **this** Chez fork:
+small, *additive* primitives that close down whole classes of FFI /
+boilerplate in jerboa.  **100% backwards-compatible** — nothing
+existing changes meaning, every addition is a brand-new binding.
+
+### Guiding rules
+
+- Every new identifier goes in the `(chezscheme)` library.
+- Every binding is declared in `s/primdata.ss` with the standard
+  `[flags primitive proc]` shape (no internal `$` prefix unless
+  truly internal).
+- Implementations live in the appropriate `s/*.ss` file; tests in
+  `mats/*.ms`; doc updates in `csug/*.stex` and
+  `release_notes/release_notes.stex`.
+- If the addition can be expressed purely in Scheme it stays in
+  Scheme — we prefer "simple new procedure" over "new VM
+  instruction".
+- The C kernel is touched **only** when a primitive cannot reasonably
+  be implemented in Scheme (e.g. `O_NONBLOCK` socket flag, OpenSSL
+  link).
+
+### Phase ordering by risk × payoff
+
+| # | Phase                                       | Risk | Effort | Jerboa payoff |
+|---|---------------------------------------------|------|--------|---------------|
+| 65| `bytevector-slice` / `bytevector-append`    | low  | small  | WS frame codec, JSON streaming, base64 |
+| 66| `(chezscheme base64)` library               | low  | small  | drops `rust-base64` from boot path |
+| 67| `(chezscheme hash sha1)` / `sha256`         | med  | medium | drops `rust-sha1` from `(std net websocket)` |
+| 68| `ordered-hashtable` (insertion-preserving)  | low  | medium | HTTP header alists, Clojure array-map |
+| 69| Public `bytevector-view` (zero-copy slice)  | high | medium | true zero-copy for WS / TCP read paths |
+| 70| `(chezscheme io nonblocking)` — fcntl etc.  | med  | medium | shrinks `(std net io)` FFI layer |
+| 71| `(chezscheme atomic)` — CAS / atomic-fixnum | med  | medium | lock-free fiber atoms without `$tc-mutex` |
+| 72| `(chezscheme record walk)` — rtd-aware walk | med  | small  | closes Round 12-jerboa diff/walk on records |
+| 73| Reader extension hooks (`read-table`)       | high | large  | kills jerboa's whole custom reader  |
+| 74| `(chezscheme tls)` — OpenSSL bindings       | high | large  | unlocks `wss://` and `https://` |
+| 75| HAMT-backed persistent map / vector / set   | high | large  | replaces `(std pmap)` / `(std pvec)` / `(std pset)` |
+| 76| Tests + plan.md Round 12 wrap + commit/push | small| none   | — |
+
+Phases 65–68 are safe, useful, and unlock the rest. They land first.
+69+ get re-evaluated after the easy wins are in.
+
+### Phase 65 — `bytevector-slice` and `bytevector-append`
+
+**`(bytevector-slice bv start end)`** → fresh bytevector containing
+bytes `[start, end)` of `bv`.  Equivalent to `make-bytevector` +
+`bytevector-copy!` but in one step and with the bounds checks done
+once.  Will become a zero-copy view in Phase 69.
+
+**`(bytevector-append bv1 ...)`** → fresh bytevector that is the
+concatenation of all arguments.  Single-pass: walks once to compute
+length, allocates once, copies each input in.
+
+**Files**:
+- `s/primdata.ss` — declarations in the `(chezscheme)`-only block.
+- `s/bytevector.ss` — implementations using `#3%bytevector-copy!`.
+- `mats/bytevector.ms` — boundary-condition tests.
+- `csug/objects.stex` — one-paragraph doc for each.
+- `release_notes/release_notes.stex` — one-line entries.
+
+### Phase 66 — `(chezscheme base64)` library
+
+Pure-Scheme base64 encoder/decoder.  Exports:
+`bytevector->base64-string`, `base64-string->bytevector`,
+`base64-encode-port`, `base64-decode-port`.
+
+Today jerboa calls `(std text base64)` (pure Scheme) but the
+WebSocket handshake bounces through `rust-random-bytes` for the
+key — once base64 is in core, the FFI hop disappears.
+
+### Phase 67 — `(chezscheme hash sha1)` / `(chezscheme hash sha256)`
+
+Pure-Scheme SHA-1 and SHA-256.  Exports `sha1-bytevector`,
+`sha1-port`, `sha256-bytevector`, `sha256-port`.
+
+Drops `rust-sha1` from `(std net websocket)` — a static-built jerboa
+no longer needs the Rust shim just for the WebSocket handshake.
+
+### Phase 68 — `ordered-hashtable`
+
+`(make-ordered-hashtable hash equiv?)` — a hashtable that preserves
+insertion order on iteration.  Exports the same surface as the
+existing R6RS `hashtable` (set!/ref/contains?/keys/values/entries)
+but `hashtable-keys` returns keys in insertion order.
+
+Implementation: an underlying `(make-hashtable hash equiv?)` plus
+a parallel doubly-linked list of cells.  No new VM support needed.
+
+Closes:
+- HTTP header preservation (today jerboa keeps a side alist).
+- Clojure `array-map` / small-pmap fast path.
+- Round-tripping JSON object key order.
+
+### Phase 69+
+
+Deferred — re-scope once 65–68 are landed and we measure the
+jerboa-side simplifications they enable.
+

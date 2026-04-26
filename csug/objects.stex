@@ -1582,6 +1582,45 @@ are signed rather than unsigned.
 
 %----------------------------------------------------------------------------
 \entryheader
+\formdef{bytevector-slice}{\categoryprocedure}{(bytevector-slice \var{bytevector} \var{start} \var{end})}
+\returns a fresh bytevector containing bytes \var{start} through \var{end}\,$-$\,1
+\listlibraries
+\endentryheader
+
+\noindent
+\var{start} and \var{end} must be exact nonnegative fixnums with
+\var{start} $\leq$ \var{end} $\leq$ \scheme{(bytevector-length \var{bytevector})}.
+The returned bytevector is freshly allocated and mutable.
+\scheme{(bytevector-slice \var{bv} \var{i} \var{j})} is equivalent to
+allocating a fresh bytevector of length \scheme{(- \var{j} \var{i})} and
+copying bytes \var{i} through \var{j}\,$-$\,1 of \var{bv} into it.
+
+\schemedisplay
+(bytevector-slice '#vu8(1 2 3 4 5) 1 4) ;=> #vu8(2 3 4)
+(bytevector-slice '#vu8(1 2 3) 0 0)     ;=> #vu8()
+(bytevector-slice '#vu8(1 2 3) 0 3)     ;=> #vu8(1 2 3)
+\endschemedisplay
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{bytevector-append}{\categoryprocedure}{(bytevector-append \var{bytevector} \dots)}
+\returns a fresh bytevector containing the concatenation of the arguments
+\listlibraries
+\endentryheader
+
+\noindent
+Each argument must be a bytevector.  The returned bytevector is
+freshly allocated and mutable.  With zero arguments, an empty
+bytevector is returned.
+
+\schemedisplay
+(bytevector-append)                      ;=> #vu8()
+(bytevector-append '#vu8(1 2) '#vu8(3))  ;=> #vu8(1 2 3)
+(bytevector-append '#vu8(1) '#vu8() '#vu8(2 3)) ;=> #vu8(1 2 3)
+\endschemedisplay
+
+%----------------------------------------------------------------------------
+\entryheader
 \formdef{bytevector-truncate!}{\categoryprocedure}{(bytevector-truncate! \var{bytevector} \var{n})}
 \returns \var{bytevector} or the empty bytevector
 \listlibraries

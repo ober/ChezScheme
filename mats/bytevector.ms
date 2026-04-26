@@ -11380,3 +11380,49 @@
      ;; Claming a too-large size in the header should fail with a suitable message:
      (bytevector-uncompress '#vu8(255 255 255 255 255 255 255 255 1 2 3)))
 )
+
+(mat bytevector-slice
+  ;; basic
+  (equal? (bytevector-slice '#vu8(1 2 3 4 5) 1 4) '#vu8(2 3 4))
+  (equal? (bytevector-slice '#vu8(1 2 3 4 5) 0 5) '#vu8(1 2 3 4 5))
+  ;; empty slice
+  (equal? (bytevector-slice '#vu8(1 2 3 4 5) 2 2) '#vu8())
+  (equal? (bytevector-slice '#vu8() 0 0) '#vu8())
+  ;; result is a fresh bytevector (mutable, distinct identity)
+  (let ([src '#vu8(1 2 3 4 5)])
+    (let ([s (bytevector-slice src 0 5)])
+      (and (not (eq? s src))
+           (begin (bytevector-u8-set! s 0 99)
+                  (and (eqv? (bytevector-u8-ref s 0) 99)
+                       (eqv? (bytevector-u8-ref src 0) 1))))))
+  ;; bad arg types
+  (error? (bytevector-slice 'foo 0 1))
+  (error? (bytevector-slice '#vu8(1 2 3) 'a 1))
+  (error? (bytevector-slice '#vu8(1 2 3) 0 'b))
+  ;; bounds errors
+  (error? (bytevector-slice '#vu8(1 2 3) -1 2))
+  (error? (bytevector-slice '#vu8(1 2 3) 0 4))
+  (error? (bytevector-slice '#vu8(1 2 3) 2 1))   ; end < start
+  (error? (bytevector-slice '#vu8(1 2 3) 4 5))
+)
+
+(mat bytevector-append
+  ;; basic
+  (equal? (bytevector-append) '#vu8())
+  (equal? (bytevector-append '#vu8(1 2)) '#vu8(1 2))
+  (equal? (bytevector-append '#vu8(1 2) '#vu8(3 4)) '#vu8(1 2 3 4))
+  (equal? (bytevector-append '#vu8(1) '#vu8(2) '#vu8(3) '#vu8(4))
+          '#vu8(1 2 3 4))
+  ;; empty pieces are fine
+  (equal? (bytevector-append '#vu8() '#vu8(1) '#vu8() '#vu8(2)) '#vu8(1 2))
+  ;; result is a fresh bytevector
+  (let ([a '#vu8(1 2)])
+    (let ([r (bytevector-append a)])
+      (and (not (eq? r a))
+           (begin (bytevector-u8-set! r 0 99)
+                  (eqv? (bytevector-u8-ref a 0) 1)))))
+  ;; non-bytevector argument
+  (error? (bytevector-append '#vu8(1) 'foo))
+  (error? (bytevector-append "abc"))
+  (error? (bytevector-append '#vu8() 17 '#vu8()))
+)

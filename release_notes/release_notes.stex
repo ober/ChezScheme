@@ -121,6 +121,25 @@ Online versions of both books can be found at
 %-----------------------------------------------------------------------------
 \section{Functionality Changes}\label{section:functionality}
 
+\subsection{New \scheme{bytevector-slice} and \scheme{bytevector-append}}
+
+Two new primitives in \scheme{(chezscheme)} that previously required
+hand-rolled \scheme{make-bytevector} + \scheme{bytevector-copy!}
+boilerplate.
+
+\scheme{(bytevector-slice \var{bv} \var{start} \var{end})} returns a
+fresh, mutable bytevector containing bytes \var{start} through
+\var{end}\,$-$\,1 of \var{bv}. Bounds are checked once.
+
+\scheme{(bytevector-append \var{bv} \dots)} returns a fresh, mutable
+bytevector that is the concatenation of all arguments. Walks the
+argument list once to compute the total length, allocates once, and
+copies each input in.
+
+Both procedures raise an exception if any argument is not a bytevector
+(or, for \scheme{bytevector-slice}, if \var{start}/\var{end} are not
+nonnegative fixnums or are out of range).
+
 \subsection{Specialized hashtable dispatch in type-recovery pass}
 
 The type-recovery pass now recognizes the sealed hashtable subtypes

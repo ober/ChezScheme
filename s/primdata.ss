@@ -1187,6 +1187,8 @@
   (bytes-deallocated [sig [() -> (uint)]] [flags unrestricted alloc])
   (bytes-finalized [sig [() -> (uint)]] [flags unrestricted alloc])
   (bytevector [sig [(u8/s8 ...) -> (bytevector)]] [flags alloc cp02])
+  (bytevector-append [sig [(bytevector ...) -> (bytevector)]] [flags alloc])
+  (bytevector-slice [sig [(bytevector sub-index sub-index) -> (bytevector)]] [flags alloc])
   (bytevector->s8-list [sig [(bytevector) -> (list)]] [flags alloc])
   (bytevector-truncate! [sig [(bytevector length) -> (bytevector)]] [flags true])
   (bytevector->immutable-bytevector [sig [(bytevector) -> (immutable-bytevector)]] [flags alloc cp02 safeongoodargs])

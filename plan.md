@@ -1919,3 +1919,171 @@ multiple servers per script.
 | 48| WebSocket tx-stream (server stub)  | medium  | med  | 47   |
 | 49| basis-tx LRU cache                 | small   | low  | 47   |
 | 50| Test suite + plan/doc + commit     | small   | none | 49   |
+
+---
+
+## Round 10 — Clojure parity polish (reify, walk, 1.11+) — **LANDED**
+
+After Round 9 closed the peer-client gaps, an audit of
+`(std clojure)` against Clojure 1.11 / 1.12 surfaced
+three remaining holes worth closing:
+
+1. **Anonymous protocol implementations** (`reify`).
+2. **`clojure.walk`** — generic structure-preserving
+   tree walking across lists, vectors, persistent maps /
+   vecs / sets, and hash-tables.
+3. **Clojure 1.11+ conveniences**: `parse-long`,
+   `parse-double`, `parse-boolean`, `parse-uuid`,
+   `random-uuid`, `update-vals`, `update-keys`,
+   `map-indexed`, `keep-indexed`, `if-some`/`when-some`,
+   `condp`, `letfn`, `case-let`, `NaN?`, `not-empty`,
+   `iteration`.
+
+### Phase 51 — `reify` in `(std protocol)` — **LANDED**
+
+`(reify (method (self ...) body) ...)` allocates a fresh
+record-type descriptor per call and registers the supplied
+method bodies against it in the protocol dispatch table,
+returning a unique instance whose first-arg dispatch fires
+the closures. Because the rtd is per-call, two reify
+forms with the same protocol method names dispatch
+independently — the same shape Clojure users expect.
+
+Caveat documented inline: in hot loops, lift the reify
+out of the loop or use `defstruct + extend-type` for a
+stable type, since each call allocates an rtd.
+
+### Phase 52 — `(std clojure walk)` — **LANDED**
+
+New library exporting `walk`, `prewalk`, `postwalk`,
+`keywordize-keys`, `stringify-keys`, `prewalk-replace`,
+`postwalk-replace`. Recognised containers (preserved on
+output): cons / list / improper list, vector,
+hash-table, persistent-map, persistent-vector,
+persistent-set. Records are deliberately treated as
+leaves — rebuilding a fresh instance via
+`record-constructor` is fragile across rtds with parents
+or non-trivial constructors; code that wants to walk a
+record's fields can convert to a map first via the
+polymorphic `assoc` in `(std clojure)`.
+
+`prewalk-replace`/`postwalk-replace` accept any of:
+persistent-map, hash-table, or alist as the substitution
+table — the previous tier-1 implementation only handled
+hash-tables, which the existing tier-1 test had been
+flagging as a one-test failure since the suite landed.
+
+### Phase 53 — Clojure 1.11+ conveniences — **LANDED**
+
+Added to `(std clojure)`:
+
+* `parse-long` / `parse-double` / `parse-boolean` /
+  `parse-uuid` — strict; return `#f` on bad input.
+* `random-uuid` — RFC-4122 v4 format.
+* `update-vals` / `update-keys` — polymorphic across
+  persistent-map and hash-table.
+* `map-indexed` / `keep-indexed` — list-only
+  (consistent with the rest of `(std clojure)`'s
+  list-first stance; a sequence-based version can come
+  with the lazy-seq integration in a later round).
+* `if-some` / `when-some` — bind name; only `#f` is
+  considered absent (matches Clojure semantics, where
+  `nil` is falsy but `false` triggers absence handling
+  in `if-some`).
+* `condp` — predicate-driven cond. The `:>>` handler
+  form is **not exercisable in default Jerboa reader
+  mode**: `:>>` reads as a Gerbil-style module path
+  rather than the literal `:>>` symbol the macro expects.
+  Workaround pending: switch the literal to `=>` (cond's
+  bind-arrow) or expose a `cloj-condp` variant whose
+  literal is read in cloj reader mode.
+* `letfn` — mutually recursive local procedures; sugar
+  over `letrec`.
+* `case-let` — `(case-let (var expr) clause ...)`,
+  sugar over `(let ([var expr]) (case var clause ...))`.
+* `NaN?` — works on real and complex.
+* `not-empty` — polymorphic across list, string, vector,
+  hash-table, persistent collections; returns `#f` on
+  empty, the input otherwise.
+* `iteration` — case-lambda, supports the `(iteration
+  step)` and `(iteration step :somef sf :vf vf :kf kf
+  :initk k0)` shapes (kf/vf/somef default to identity).
+
+### Phase 54 — Tests — **LANDED**
+
+* `tests/test-protocol.ss` — 6 new reify tests
+  (single/multiple methods, lexical closure, `satisfies?`
+  interaction, instance isolation, instance uniqueness).
+  **45 tests, 45 pass**.
+* `tests/test-clojure-walk.ss` — 21 tests across
+  lists, vectors, persistent collections, hash-tables,
+  keywordize-keys / stringify-keys (with both pmap and
+  hash-table inputs), postwalk/prewalk-replace, improper
+  lists. **21 tests, 21 pass**.
+* `tests/test-clojure-tier3.ss` — 45 tests covering all
+  1.11+ additions (minus the `:>>` reader-limited case).
+  **45 tests, 45 pass**.
+* `tests/test-clojure-tier1.ss` — pre-existing tier-1
+  test against `postwalk-replace + hash-map` was a known
+  failure since the suite landed; fixed as a side-effect
+  of Phase 52 by adding persistent-map support to the
+  replacement-map branch. **30 tests, 30 pass** (was
+  29/30).
+* `tests/test-clojure-features.ss` — unchanged. **49
+  tests, 49 pass**.
+
+Total clojure-suite tally: **190 passing, 0 failing**.
+
+### Round 10 execution order
+
+| # | Phase                                | Effort | Risk | Gate |
+|---|--------------------------------------|--------|------|------|
+| 51| `reify` macro in (std protocol)      | small  | low  | —    |
+| 52| (std clojure walk) library           | medium | low  | —    |
+| 53| Clojure 1.11+ conveniences           | medium | low  | —    |
+| 54| Tests for 51/52/53                   | small  | none | 51-53|
+| 55| plan.md + identify Round 11 + commit | small  | none | 54   |
+
+### Round 11 candidates (gaps still open)
+
+The audit found a handful of items that could land next:
+
+1. **`fiber-ws-connect`** — Round 9 Phase 48 left
+   server-side `tx-stream` as a stub; closing it requires
+   a client-side WebSocket helper in `(std net fiber-ws)`.
+   Once present, jerboa-db can ship a real
+   `remote-tx-stream` and `remote-listen!`.
+
+2. **`clojure.zip`** — functional zipper over trees.
+   Useful for editing nested EDN/JSON without rebuilding
+   intermediate nodes manually. Pure Scheme; ~150 LoC.
+
+3. **`clojure.data/diff`** — recursive diff on nested
+   data, returning `[only-in-a only-in-b in-both]`.
+   Builds on Round 10's walk machinery.
+
+4. **`condp :>>` reader workaround** — pick one:
+   (a) accept `=>` as an alias for `:>>`, (b) expose a
+   second macro `cloj-condp` whose body is parsed in
+   cloj reader mode, (c) document the limitation
+   permanently. Lowest-friction is (a).
+
+5. **Sequence-aware `map-indexed` / `keep-indexed`** —
+   today's implementations are list-only. A second
+   variant that consumes lazy-seqs (and persistent
+   vectors as seqs) would round out the parity story.
+
+6. **`clojure.core.async/timeout`** as a real channel
+   that closes after N ms — `(std csp clj)` exposes
+   `timeout` but it's currently a thin wrapper; making
+   it a first-class closing channel matches Clojure's
+   contract.
+
+7. **`reduce-kv` on hash-table** — currently
+   persistent-map only.
+
+8. **Spec gen integration** — `(std spec)` validates but
+   doesn't generate. A minimal `gen` that produces values
+   for the built-in predicates would unlock
+   property-style testing.
+

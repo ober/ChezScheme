@@ -1836,3 +1836,86 @@ script terminates promptly without waiting on that thread.
 | 43| Parquet/CSV bulk I/O                  | trivial | none | —    |
 | 44| Schema migration tests + doc          | small   | low  | —    |
 | 45| TLS on Raft TCP transport             | medium  | med  | 44   |
+
+## Round 9 — Peer client polish (LANDED 2026-04-26)
+
+The peer client (Round 6) shipped the basic
+`remote-q`/`remote-pull`/`remote-transact!` surface but
+missed a handful of round-trips Datomic users expect:
+`remote-entity`, named-database routing, and a
+basis-tx-keyed cache. Round 9 closes those gaps and fixes
+two parent-jerboa bugs uncovered by Termux fiber-httpd
+running under load.
+
+### Phase 46 — `remote-entity` — **LANDED**
+
+`(remote-entity peer eid)` mirrors `(pull '[*] eid)` over
+HTTP via a new `GET /api/entity/:id` route. Result is
+cached under `(last-tx, 'entity, eid)`.
+
+### Phase 47 — Named-database routing — **LANDED**
+
+`connect-remote` now accepts an optional db-name string;
+all `/api/*` URLs become `/api/db/<name>/*`. The server
+uses an in-process registry (`register-db!` / `lookup-db`)
+so a single fiber-httpd can host multiple databases.
+Operations against an unknown name return 404.
+
+### Phase 48 — `remote-tx-stream` (server side) — **STUB**
+
+`/api/tx-stream` is wired as a WebSocket endpoint via
+`fiber-ws-upgrade` and `ws-broadcast!`. The client side
+needs a `fiber-ws-connect` helper in jerboa
+(`std net fiber-ws` only exposes the server upgrade
+today); until that lands, applications can poll
+`remote-db` and watch `basis-tx` advance. Documented in
+`peer.ss`.
+
+### Phase 49 — Basis-tx-keyed query cache — **LANDED**
+
+`remote-q`/`remote-pull`/`remote-entity` consult an LRU
+cache keyed on
+`(remote-connection-last-tx . op . args)`. `last-tx` is
+refreshed on every `remote-db` call and on each
+`remote-transact!`, so any tx automatically invalidates
+older entries by changing the key prefix.
+
+Public surface:
+- `remote-cache-stats` → `((size . n) (capacity . n) (last-tx . n))`
+- `remote-cache-clear!`
+- `remote-cache-set-capacity!` (default 256)
+
+### Phase 50 — Tests + docs + commit — **LANDED**
+
+`tests/test-peer.ss` exercises read/pull/entity, all three
+cache operations, named-DB routing, and isolation between
+default/named DBs (13 tests, 13 passes on Termux). The
+suite uses a single shared fiber-httpd because
+start/stop-server cycles on Termux are too flaky to run
+multiple servers per script.
+
+**Parent jerboa fixes uncovered along the way:**
+
+* `jerboa_epoll_wait` (Rust): retry transparently on
+  EINTR. Termux delivers signals during long syscalls and
+  the previous wrapper turned them into fatal errors that
+  killed the poller thread.
+* `(std net io) poller-loop`: wrap the FFI call in a
+  `guard` so any remaining transient failures degrade to
+  an empty event list instead of taking down fiber-httpd.
+* `(std text edn) write-edn-list`: tolerate dotted /
+  improper pairs. Without this, a `(cons key value)` in a
+  transact op crashes the EDN serializer.
+* `lib.rs`: gate Linux-only modules on
+  `target_os = "linux"` *or* `"android"` so a Termux build
+  still includes epoll + http_parse.
+
+### Round 9 execution order
+
+| # | Phase                              | Effort  | Risk | Gate |
+|---|------------------------------------|---------|------|------|
+| 46| `remote-entity` route + client     | small   | low  | —    |
+| 47| Named-DB routing                   | small   | low  | 46   |
+| 48| WebSocket tx-stream (server stub)  | medium  | med  | 47   |
+| 49| basis-tx LRU cache                 | small   | low  | 47   |
+| 50| Test suite + plan/doc + commit     | small   | none | 49   |

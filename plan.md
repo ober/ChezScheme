@@ -2087,3 +2087,73 @@ The audit found a handful of items that could land next:
    for the built-in predicates would unlock
    property-style testing.
 
+## Round 11 — All eight Round 11 candidates landed (2026-04-26) — **LANDED**
+
+| # | Phase | Status | What landed |
+|---|-------|--------|-------------|
+| 56| `condp` `=>` alias for `:>>`            | done | (a) workaround in `(std clojure)` — accepts both literals |
+| 57| `reduce-kv` on hash-table               | done | already worked in Round 10's clojure layer; verified |
+| 58| `(std clojure data)` — recursive diff   | done | `diff a b` → `(only-a only-b in-both)`; lists, vectors, pmap, pset, pvec, hash-table |
+| 59| `(std clojure zip)` — functional zipper | done | `zipper`/`seq-zip`/`vector-zip`/`xml-zip`; up/down/left/right/leftmost/rightmost; replace/edit/insert/remove; root/end?/next/prev |
+| 60| Sequence-aware `map-indexed`/`keep-indexed` | done | both now accept lists, vectors, persistent-vectors, and strings via a single `%coerce-to-seq` helper |
+| 61| `core.async/timeout` as closing chan    | done | already implemented in `(std csp select)` — confirmed `<!!` returns EOF after the duration |
+| 62| Spec generator integration              | done | `s-gen`, `s-sample` in `(std spec)`; supports `pred`, `s-and` (accept/reject), `s-or` (uniform pick), `s-tuple`, `s-coll-of`, `s-map-of`, `s-enum`, `s-nilable`, `s-keys` |
+| 63| `fiber-ws-connect` (client WebSocket)   | done | client-side handshake in `(std net fiber-ws)` with `Sec-WebSocket-Key`/`Sec-WebSocket-Accept` verification; outbound frames auto-masked when `client?` set |
+| 64| Tests + plan.md + commit/push           | done | `test-clojure-data` (16), `test-clojure-zip` (21), `test-clojure-r11` (8), 7 new tests in `test-spec` (63 total) |
+
+### Round 11 highlights
+
+- **Zipper**: full clojure.zip semantics with `(except (chezscheme) remove)`
+  to avoid name clash; record carries `branch?-p` / `children-p` / `make-p`
+  so all operations stay polymorphic across container kinds.
+
+- **diff**: matches Clojure semantics — leading/index alignment with `#f`
+  preserved (e.g., `(diff '(1 2) '(1 2 3))` → `(#f (#f #f 3) (1 2))`),
+  empty containers collapse to `#f`, all-`#f` lists collapse to `#f`.
+
+- **fiber-ws-connect**: added `client?` field to the `fiber-ws` record;
+  outbound frames now route through `write-ws-frame-via` which generates
+  a 4-byte mask key per frame on client connections (RFC 6455 § 5.3 MUST).
+
+- **`condp =>`**: dual-literal `syntax-rules` accepts both `:>>` and `=>`;
+  the `=>` form survives the default reader's Gerbil-style colon parsing.
+
+- **spec gen**: returns thunks (matches clojure.spec); accept/reject
+  capped at 200 retries to avoid infinite loops on contradictory `s-and`.
+
+### Round 12 candidates (gaps still open)
+
+The most useful next bets after Round 11:
+
+1. **HTTP client `Sec-WebSocket-Protocol` negotiation** — `fiber-ws-connect`
+   sends no subprotocols today. Add an optional `subprotocols` argument and
+   surface the server's choice on the returned `fiber-ws`.
+
+2. **TLS for `fiber-ws-connect`** — currently plain TCP only. `wss://`
+   needs a TLS wrapper; `(std crypto tls)` exists but is not wired into
+   the fiber-aware I/O path yet.
+
+3. **`clojure.core.match`-style guarded clauses in `(std clojure)`** —
+   `condp` and `case-let` cover most use cases; richer `match` predicates
+   would close the parity gap with `clojure.core.match`.
+
+4. **`clojure.core/reduced-kv`-aware `transduce` on hash-table** — Round
+   11 added `reduce-kv`; doing the same for `transduce` lets transducers
+   work over hash-tables without conversion.
+
+5. **Spec-driven property testing** — Round 11 added the gen substrate;
+   a `s-quickcheck` driver that runs N samples and shrinks counter-examples
+   would close the loop.
+
+6. **`(std clojure zip)` traversal seq** — Clojure's zipper supports
+   `loc-seq` style lazy walking via `next`/`end?`; we have both but no
+   `tree-seq` integration. ~30 LoC bridge.
+
+7. **`xml-zip` SXML round-trip tests** — the XML zipper exists but is
+   only smoke-tested. A real fixture from `(std text xml)` would catch
+   tag/attribute edge cases.
+
+8. **`clojure.data/diff` on records** — currently records are treated
+   as opaque equal? leaves. Walking record fields (when both sides share
+   an rtd) would close the parity gap with `clojure.data`.
+

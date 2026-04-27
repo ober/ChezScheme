@@ -1507,4 +1507,210 @@ Documentation notes:
           (lambda (record)
             (unless ($record? record) ($oops who "~s is not a record" record))
             (lookup-hash-procedure record))))))
+
+  ;; Ordered hashtable: insertion-order-preserving variant.  Backed by a
+  ;; plain hashtable (key -> cell) plus a doubly-linked list of cells so
+  ;; iteration walks keys in the order they were first inserted.
+  (let ()
+    (define-record-type oht
+      (fields (immutable ht oht-ht)
+              (immutable hashfn oht-hashfn)
+              (immutable equivfn oht-equivfn)
+              (mutable head oht-head oht-set-head!)
+              (mutable tail oht-tail oht-set-tail!)
+              (mutable count oht-count oht-set-count!))
+      (nongenerative)
+      (sealed #t))
+    (define-record-type ohtcell
+      (fields (immutable key cell-key)
+              (mutable value cell-value cell-set-value!)
+              (mutable prev cell-prev cell-set-prev!)
+              (mutable next cell-next cell-set-next!))
+      (nongenerative)
+      (sealed #t))
+    (define (link-tail! oht cell)
+      (let ([t (oht-tail oht)])
+        (cond
+          [t (cell-set-next! t cell)
+             (cell-set-prev! cell t)
+             (oht-set-tail! oht cell)]
+          [else (oht-set-head! oht cell)
+                (oht-set-tail! oht cell)])))
+    (define (unlink! oht cell)
+      (let ([p (cell-prev cell)] [n (cell-next cell)])
+        (if p (cell-set-next! p n) (oht-set-head! oht n))
+        (if n (cell-set-prev! n p) (oht-set-tail! oht p))
+        (cell-set-prev! cell #f)
+        (cell-set-next! cell #f)))
+    (set-who! make-ordered-hashtable
+      (lambda (hashfn equivfn)
+        (unless (procedure? hashfn) ($oops who "~s is not a procedure" hashfn))
+        (unless (procedure? equivfn) ($oops who "~s is not a procedure" equivfn))
+        (make-oht (make-hashtable hashfn equivfn) hashfn equivfn #f #f 0)))
+    (set-who! ordered-hashtable?
+      (lambda (x) (oht? x)))
+    (set-who! ordered-hashtable-size
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (oht-count h)))
+    (set-who! ordered-hashtable-ref
+      (lambda (h key default)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (let ([c (hashtable-ref (oht-ht h) key #f)])
+          (if c (cell-value c) default))))
+    (set-who! ordered-hashtable-contains?
+      (lambda (h key)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (hashtable-contains? (oht-ht h) key)))
+    (set-who! ordered-hashtable-set!
+      (lambda (h key val)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (let ([c (hashtable-ref (oht-ht h) key #f)])
+          (cond
+            [c (cell-set-value! c val)]
+            [else
+             (let ([nc (make-ohtcell key val #f #f)])
+               (hashtable-set! (oht-ht h) key nc)
+               (link-tail! h nc)
+               (oht-set-count! h (fx+ (oht-count h) 1)))]))))
+    (set-who! ordered-hashtable-delete!
+      (lambda (h key)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (let ([c (hashtable-ref (oht-ht h) key #f)])
+          (when c
+            (unlink! h c)
+            (hashtable-delete! (oht-ht h) key)
+            (oht-set-count! h (fx- (oht-count h) 1))))))
+    (set-who! ordered-hashtable-update!
+      (lambda (h key proc default)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (unless (procedure? proc) ($oops who "~s is not a procedure" proc))
+        (let ([c (hashtable-ref (oht-ht h) key #f)])
+          (cond
+            [c (cell-set-value! c (proc (cell-value c)))]
+            [else
+             (let ([nc (make-ohtcell key (proc default) #f #f)])
+               (hashtable-set! (oht-ht h) key nc)
+               (link-tail! h nc)
+               (oht-set-count! h (fx+ (oht-count h) 1)))]))))
+    (set-who! ordered-hashtable-clear!
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (hashtable-clear! (oht-ht h))
+        (oht-set-head! h #f)
+        (oht-set-tail! h #f)
+        (oht-set-count! h 0)))
+    (set-who! ordered-hashtable-keys
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (let ([v (make-vector (oht-count h))])
+          (let loop ([c (oht-head h)] [i 0])
+            (when c
+              (vector-set! v i (cell-key c))
+              (loop (cell-next c) (fx+ i 1))))
+          v)))
+    (set-who! ordered-hashtable-values
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (let ([v (make-vector (oht-count h))])
+          (let loop ([c (oht-head h)] [i 0])
+            (when c
+              (vector-set! v i (cell-value c))
+              (loop (cell-next c) (fx+ i 1))))
+          v)))
+    (set-who! ordered-hashtable-entries
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (let* ([n (oht-count h)]
+               [ks (make-vector n)]
+               [vs (make-vector n)])
+          (let loop ([c (oht-head h)] [i 0])
+            (when c
+              (vector-set! ks i (cell-key c))
+              (vector-set! vs i (cell-value c))
+              (loop (cell-next c) (fx+ i 1))))
+          (values ks vs))))
+    (set-who! ordered-hashtable-cells
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (let ([v (make-vector (oht-count h))])
+          (let loop ([c (oht-head h)] [i 0])
+            (when c
+              (vector-set! v i (cons (cell-key c) (cell-value c)))
+              (loop (cell-next c) (fx+ i 1))))
+          v)))
+    (set-who! ordered-hashtable-walk
+      (lambda (h proc)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (unless (procedure? proc) ($oops who "~s is not a procedure" proc))
+        (let loop ([c (oht-head h)])
+          (when c
+            (proc (cell-key c) (cell-value c))
+            (loop (cell-next c))))))
+    (set-who! ordered-hashtable-copy
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (let ([new (make-oht (make-hashtable (oht-hashfn h) (oht-equivfn h))
+                             (oht-hashfn h) (oht-equivfn h) #f #f 0)])
+          (let loop ([c (oht-head h)])
+            (when c
+              (let ([nc (make-ohtcell (cell-key c) (cell-value c) #f #f)])
+                (hashtable-set! (oht-ht new) (cell-key c) nc)
+                (link-tail! new nc)
+                (oht-set-count! new (fx+ (oht-count new) 1))
+                (loop (cell-next c)))))
+          new)))
+    (set-who! ordered-hashtable-equivalence-function
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (oht-equivfn h)))
+    (set-who! ordered-hashtable-hash-function
+      (lambda (h)
+        (unless (oht? h) ($oops who "~s is not an ordered-hashtable" h))
+        (oht-hashfn h))))
+
+  ;; Record reflection — walk an R6RS record's fields (incl. inherited).
+  ;; record-fields → vector of field names (parents first).
+  ;; record-walk   → vector of (field-name . value) pairs.
+  ;; record->alist → list of (field-name . value) pairs.
+  (let ()
+    (define (collect-rtd-chain rtd)
+      (let loop ([rtd rtd] [acc '()])
+        (if rtd
+            (loop (record-type-parent rtd) (cons rtd acc))
+            acc)))
+    (define (all-field-names rtd)
+      (let ([chain (collect-rtd-chain rtd)])
+        (let loop ([chain chain] [acc '()])
+          (if (null? chain)
+              (list->vector (reverse acc))
+              (let* ([names (vector->list (record-type-field-names (car chain)))])
+                (loop (cdr chain) (append (reverse names) acc)))))))
+    (set-who! record-fields
+      (lambda (r)
+        (unless ($record? r) ($oops who "~s is not a record" r))
+        (all-field-names (record-rtd r))))
+    (set-who! record-walk
+      (lambda (r)
+        (unless ($record? r) ($oops who "~s is not a record" r))
+        (let* ([rtd (record-rtd r)]
+               [chain (collect-rtd-chain rtd)])
+          (let loop ([chain chain] [acc '()])
+            (if (null? chain)
+                (list->vector (reverse acc))
+                (let* ([this (car chain)]
+                       [names (record-type-field-names this)]
+                       [n (vector-length names)])
+                  (let inner ([i 0] [acc acc])
+                    (if (fx= i n)
+                        (loop (cdr chain) acc)
+                        (let ([accessor (record-accessor this i)])
+                          (inner (fx+ i 1)
+                                 (cons (cons (vector-ref names i)
+                                             (accessor r))
+                                       acc)))))))))))
+    (set-who! record->alist
+      (lambda (r)
+        (unless ($record? r) ($oops who "~s is not a record" r))
+        (vector->list (record-walk r)))))
 )

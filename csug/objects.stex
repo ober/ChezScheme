@@ -1698,6 +1698,79 @@ returns it as a freshly-allocated 32-byte bytevector.
 
 %----------------------------------------------------------------------------
 \entryheader
+\formdef{make-ordered-hashtable}{\categoryprocedure}{(make-ordered-hashtable \var{hash-fn} \var{equiv-fn})}
+\formdef{ordered-hashtable?}{\categoryprocedure}{(ordered-hashtable? \var{obj})}
+\formdef{ordered-hashtable-size}{\categoryprocedure}{(ordered-hashtable-size \var{oht})}
+\formdef{ordered-hashtable-ref}{\categoryprocedure}{(ordered-hashtable-ref \var{oht} \var{key} \var{default})}
+\formdef{ordered-hashtable-set!}{\categoryprocedure}{(ordered-hashtable-set! \var{oht} \var{key} \var{value})}
+\formdef{ordered-hashtable-delete!}{\categoryprocedure}{(ordered-hashtable-delete! \var{oht} \var{key})}
+\formdef{ordered-hashtable-contains?}{\categoryprocedure}{(ordered-hashtable-contains? \var{oht} \var{key})}
+\formdef{ordered-hashtable-update!}{\categoryprocedure}{(ordered-hashtable-update! \var{oht} \var{key} \var{proc} \var{default})}
+\formdef{ordered-hashtable-clear!}{\categoryprocedure}{(ordered-hashtable-clear! \var{oht})}
+\formdef{ordered-hashtable-keys}{\categoryprocedure}{(ordered-hashtable-keys \var{oht})}
+\formdef{ordered-hashtable-values}{\categoryprocedure}{(ordered-hashtable-values \var{oht})}
+\formdef{ordered-hashtable-entries}{\categoryprocedure}{(ordered-hashtable-entries \var{oht})}
+\formdef{ordered-hashtable-cells}{\categoryprocedure}{(ordered-hashtable-cells \var{oht})}
+\formdef{ordered-hashtable-walk}{\categoryprocedure}{(ordered-hashtable-walk \var{oht} \var{proc})}
+\formdef{ordered-hashtable-copy}{\categoryprocedure}{(ordered-hashtable-copy \var{oht})}
+\formdef{ordered-hashtable-equivalence-function}{\categoryprocedure}{(ordered-hashtable-equivalence-function \var{oht})}
+\formdef{ordered-hashtable-hash-function}{\categoryprocedure}{(ordered-hashtable-hash-function \var{oht})}
+\returns see below
+\listlibraries
+\endentryheader
+
+\noindent
+An \emph{ordered hashtable} is a hashtable variant that remembers the
+order in which keys were first inserted.  The surface mirrors the
+R6RS \scheme{hashtable} surface, but \scheme{ordered-hashtable-keys},
+\scheme{ordered-hashtable-values}, \scheme{ordered-hashtable-entries},
+\scheme{ordered-hashtable-cells}, and \scheme{ordered-hashtable-walk}
+all visit entries in insertion order.  Updating the value at an
+existing key keeps that key's original position.
+
+\schemedisplay
+(define h (make-ordered-hashtable equal-hash equal?))
+(ordered-hashtable-set! h "first" 1)
+(ordered-hashtable-set! h "second" 2)
+(ordered-hashtable-set! h "third" 3)
+(ordered-hashtable-keys h)            ;=> #("first" "second" "third")
+(ordered-hashtable-set! h "second" 99)  ; update keeps position
+(ordered-hashtable-values h)          ;=> #(1 99 3)
+(ordered-hashtable-delete! h "first")
+(ordered-hashtable-keys h)            ;=> #("second" "third")
+\endschemedisplay
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{record-fields}{\categoryprocedure}{(record-fields \var{record})}
+\formdef{record-walk}{\categoryprocedure}{(record-walk \var{record})}
+\formdef{record->alist}{\categoryprocedure}{(record->alist \var{record})}
+\returns see below
+\listlibraries
+\endentryheader
+
+\noindent
+\scheme{record-fields} returns a vector of field-name symbols for an
+R6RS record, including inherited fields (parents first).
+\scheme{record-walk} returns a vector of \scheme{(field-name . value)}
+pairs in the same order.
+\scheme{record->alist} returns the same data as a list of pairs.
+All three signal an error if their argument is not a record.
+
+\schemedisplay
+(define-record-type pt (fields x y))
+(define p (make-pt 3 4))
+(record-fields p)    ;=> #(x y)
+(record-walk p)      ;=> #((x . 3) (y . 4))
+(record->alist p)    ;=> ((x . 3) (y . 4))
+
+(define-record-type base (fields a))
+(define-record-type sub (parent base) (fields b))
+(record-fields (make-sub 1 2))  ;=> #(a b)  ; parents first
+\endschemedisplay
+
+%----------------------------------------------------------------------------
+\entryheader
 \formdef{bytevector-truncate!}{\categoryprocedure}{(bytevector-truncate! \var{bytevector} \var{n})}
 \returns \var{bytevector} or the empty bytevector
 \listlibraries

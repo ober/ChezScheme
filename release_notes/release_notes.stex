@@ -173,6 +173,45 @@ They are intended for protocol use (WebSocket key handshake, content
 addressing, fingerprinting); for new applications requiring secure
 hashing, prefer SHA-256.
 
+\subsection{New \scheme{ordered-hashtable} (insertion-order-preserving)}
+
+A new hashtable variant in \scheme{(chezscheme)} that records the
+order in which keys are first inserted and walks them in that order:
+
+\schemedisplay
+(define h (make-ordered-hashtable equal-hash equal?))
+(ordered-hashtable-set! h "first"  1)
+(ordered-hashtable-set! h "second" 2)
+(ordered-hashtable-set! h "third"  3)
+(ordered-hashtable-keys h)   ;=> #("first" "second" "third")
+\endschemedisplay
+
+The surface mirrors the R6RS \scheme{hashtable} surface, with
+\scheme{ordered-} prefixes on every operation.  Updates to an existing
+key preserve that key's original position; deletions splice the key
+out without disturbing surrounding order.  Backed by a plain hashtable
+plus a doubly-linked list of cells, so all operations stay constant
+time.  Useful for HTTP header tables, JSON-object key preservation,
+and any container where iteration order is part of the contract.
+
+\subsection{New \scheme{record-walk} / \scheme{record-fields} / \scheme{record->alist}}
+
+R6RS reflection helpers in \scheme{(chezscheme)} that walk a record's
+fields, including inherited ones (parents first):
+
+\schemedisplay
+(define-record-type pt (fields x y))
+(record-fields (make-pt 3 4))   ;=> #(x y)
+(record-walk   (make-pt 3 4))   ;=> #((x . 3) (y . 4))
+(record->alist (make-pt 3 4))   ;=> ((x . 3) (y . 4))
+\endschemedisplay
+
+These are pure-Scheme wrappers over \scheme{record-rtd},
+\scheme{record-type-field-names}, and \scheme{record-type-parent}.
+They make ad-hoc record introspection (debug printing, serialization,
+schema checks) a one-liner without forcing every record type to derive
+its own pretty-printer.
+
 \subsection{Specialized hashtable dispatch in type-recovery pass}
 
 The type-recovery pass now recognizes the sealed hashtable subtypes

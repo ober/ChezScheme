@@ -2254,7 +2254,7 @@ canonical FIPS 180-2 test vectors plus padding-boundary cases (55 and
 statically built jerboa no longer needs the Rust shim just for the
 WebSocket handshake.
 
-### Phase 68 — `ordered-hashtable`
+### Phase 68 — `ordered-hashtable` — LANDED 2026-04-26
 
 `(make-ordered-hashtable hash equiv?)` — a hashtable that preserves
 insertion order on iteration.  Exports the same surface as the
@@ -2262,15 +2262,99 @@ existing R6RS `hashtable` (set!/ref/contains?/keys/values/entries)
 but `hashtable-keys` returns keys in insertion order.
 
 Implementation: an underlying `(make-hashtable hash equiv?)` plus
-a parallel doubly-linked list of cells.  No new VM support needed.
+a parallel doubly-linked list of `ohtcell` records (key/value/prev/next).
+Both `oht` and `ohtcell` are sealed/nongenerative R6RS records.  No new
+VM support needed; lives in `s/newhash.ss`.
+
+17 primitives wired through `s/primdata.ss`: `make-ordered-hashtable`,
+`ordered-hashtable?`, `-size`, `-ref`, `-contains?`, `-set!`, `-delete!`,
+`-update!`, `-clear!`, `-keys`, `-values`, `-entries`, `-cells`, `-copy`,
+`-walk`, `-equivalence-function`, `-hash-function`.  Custom return type
+`ordered-hashtable` keeps signatures consistent with `alloc` flag.
+
+Tests: `mats/hash.ms` `(mat ordered-hashtable ...)` block — 16 clauses
+covering insertion order, update-keeps-position, delete-from-head/tail/middle,
+clear/copy independence, walk-in-order, error cases.  All pass at o=3.
+
+Docs: `csug/objects.stex` (after `sha256-bytevector`) and
+`release_notes/release_notes.stex` (subsection after SHA section).
 
 Closes:
 - HTTP header preservation (today jerboa keeps a side alist).
 - Clojure `array-map` / small-pmap fast path.
 - Round-tripping JSON object key order.
 
-### Phase 69+
+### Phase 69 — Bytevector zero-copy view — DEFERRED
 
-Deferred — re-scope once 65–68 are landed and we measure the
-jerboa-side simplifications they enable.
+Aliased view over a parent bytevector + offset + length needs
+either GC-aware "shared bytevector" representation or borrow tracking.
+Both require kernel/GC work that is not session-scale.  Defer until
+profiling identifies a concrete jerboa workload bottlenecked on
+this (current `bytevector-slice` copies but is fast enough for HTTP).
+
+### Phase 70 — Nonblocking I/O via `fcntl` — DEFERRED
+
+Chez's port layer is synchronous; nonblocking would require either
+an event loop on the C side or careful refactor of `c/io.c` and
+`c/new-io.c`.  Out of session scope.  Jerboa's `(std async)` already
+provides the cooperative model that consumers actually need; the
+underlying ports being blocking is fine because request handlers
+run on dedicated threads.
+
+### Phase 71 — Atomic primitives — DEFERRED
+
+Coarse mutex-wrapped atomics (`atomic-box`, `atomic-cas!`,
+`atomic-fetch-add!`) are technically session-scale but offer little
+beyond what `$tc-mutex` and `make-mutex` already provide for jerboa
+usage patterns.  True lock-free atomics need backend instruction
+selection per architecture (LL/SC on arm64, `lock cmpxchg` on x86_64,
+etc.) — that's `cpnanopass.ss` + `arm64.ss` + `x86_64.ss` work.
+Defer until a concrete jerboa workload measures lock contention.
+
+### Phase 72 — `record-walk` / `record-fields` / `record->alist` — LANDED 2026-04-26
+
+Pure-Scheme reflection on R6RS records using `record-rtd`,
+`record-type-field-names`, and `record-type-parent`.  Walks the
+inheritance chain to collect all fields (parents first), then
+returns either a vector of `(field-name . value)` cons pairs
+(`record-walk`/`record->alist`) or just the field-name vector
+(`record-fields`).  Lives in `s/newhash.ss` near other reflection
+helpers.  No new VM support.
+
+### Phase 73 — Reader hooks — DEFERRED
+
+Reader macros / dispatch table customisation needs `c/scan.c` and
+`s/read.ss` integration.  Significant kernel surgery.  Defer.
+
+### Phase 74 — TLS — DEFERRED
+
+In-tree TLS would mean either statically linking OpenSSL/BoringSSL
+(licensing + footprint trade-offs) or implementing TLS 1.3 in Scheme
+(massive).  Jerboa already gets TLS via the `(std net request)`
+shell-out path and via `socat` for servers.  Defer indefinitely;
+this is a multi-month project on its own.
+
+### Phase 75 — HAMT — DEFERRED
+
+Persistent hash array-mapped trie in Chez core.  Jerboa already has a
+working HAMT in `lib/jerboa/persistent/hamt.sls` (Round 2 perf work).
+Re-implementing in Chez core is duplicative unless we measure the
+jerboa version as a bottleneck (we don't).  Defer.
+
+### Phase 39 — Jerboa "web skin" — OUT OF SCOPE for ChezScheme repo
+
+Lives in jerboa repo.  Not a Chez change.
+
+### Phase 48 — `remote-tx-stream` — OUT OF SCOPE for ChezScheme repo
+
+Lives in jerboa repo.  Not a Chez change.
+
+### Phase 76 — Round 12 wrap-up — LANDED 2026-04-26
+
+Phases 65, 66, 67, 68, 72 LANDED in ChezScheme core.
+Phases 69, 70, 71, 73, 74, 75 deferred with rationale above —
+each requires deep kernel/GC/backend work that is not session-scale,
+or duplicates existing jerboa-side functionality that has no
+measured bottleneck driving a Chez-core rewrite.
+Phases 39, 48 belong to jerboa repo, not this one.
 

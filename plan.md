@@ -2448,3 +2448,69 @@ Closes the post-Round-12 Clojure-parity audit; jerboa's stdlib
 now covers generators + shrinking + property assertions on top
 of the existing `(std spec)` validator.
 
+## Round 14 — Clojure `defprotocol` (jerboa-side)
+
+Closes the remaining Clojure-idiomatic gap: a general-purpose
+type-dispatched protocol mechanism analogous to `clojure.core`'s
+`defprotocol` / `extend-type` / `extend-protocol` / `satisfies?`.
+
+`(std actor protocol)` already exposes a `defprotocol` macro,
+but it's actor-specific (ask/tell/reply).  The new module
+`(std clojure protocol)` provides the general value-dispatch form
+used by ordinary Clojure code — independent of actors.
+
+`defmulti` already covers dispatch with a custom selector function;
+`defprotocol` is the simpler "dispatch on the type of the first
+argument" idiom that Clojure code reaches for first.
+
+### Phase 82 — Protocol core — LANDED 2026-04-27
+
+- `(defprotocol Name (method [this args ...]) ...)` defines a
+  protocol with a list of methods.  Each method becomes an
+  ordinary procedure that dispatches on the first argument.
+- `(extend-type type-pred Protocol (method [this args ...] body) ...)`
+  registers implementations of Protocol for any value matching
+  `type-pred` (a one-argument predicate).
+- `(extend-protocol Protocol type-pred (method [this args ...] body) ...)`
+  is `extend-type` with the order swapped (matches Clojure usage).
+- `(satisfies? Protocol value)` — does `value`'s type extend Protocol?
+- `(extends? Protocol type-pred)` — has Protocol been extended for
+  a given predicate?
+
+Implementation: each protocol carries a list of
+`(predicate . method-alist)` entries; method dispatch walks the
+list for the first matching predicate.  No GC-aware machinery
+needed; pure record + closures.
+
+### Phase 83 — Built-in type registrations + extend-protocol multi-type — LANDED 2026-04-27
+
+- `extend-protocol` accepts `pred (method ...) ... pred (method ...) ...`
+  to extend several types in one form (Clojure idiom).
+- Convenience predicates re-exported under their Clojure names:
+  `Number?`, `String?`, `Vector?`, `List?`, `Keyword?`, `Symbol?`
+  alias the corresponding jerboa predicates so `extend-protocol P
+  Number? (...) String? (...)` reads naturally.
+- Falls back gracefully: if no impl matches, the dispatch raises
+  `protocol-not-satisfied` with the protocol name, method, and value.
+
+### Phase 84 — Tests + cookbook + commit — LANDED 2026-04-27
+
+- `tests/test-clojure-protocol.ss` covers:
+  define + extend across multiple types,
+  `defrecord` + manual `extend-type`,
+  `satisfies?` / `extends?` truth tables,
+  multi-type `extend-protocol`,
+  `protocol-not-satisfied` error path.
+- Cookbook recipe `clojure-defprotocol` saved.
+- Commit + push to jerboa master.
+
+### Round 14 wrap-up — LANDED 2026-04-27
+
+Phase 82-84 implemented in jerboa as `lib/std/clojure/protocol.sls`.
+Pure-Scheme; no Chez core changes.  Definitive end of the Clojure
+parity push: `defprotocol` joins the existing `defmulti`,
+persistent collections, transducers, core.async, spec, walk/zip/set,
+1.11+ helpers, reify, and test.check.  Remaining Clojure surface
+(`core.logic`, full `cl-format`, `tools.cli`, transit) is niche
+and not blocking idiomatic Clojure-style jerboa code.
+

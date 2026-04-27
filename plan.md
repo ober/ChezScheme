@@ -2358,3 +2358,93 @@ or duplicates existing jerboa-side functionality that has no
 measured bottleneck driving a Chez-core rewrite.
 Phases 39, 48 belong to jerboa repo, not this one.
 
+## Round 13 — Clojure `test.check` generative testing (jerboa-side)
+
+Closes the last meaningful Clojure-stdlib parity gap surfaced in
+the post-Round-12 audit: spec validates values, but jerboa has no
+generator-driven property testing equivalent to `clojure.test.check`.
+
+This round is **jerboa-repo work** — pure Scheme on top of the
+Round 12 prims (record reflection, ordered hashtables) and the
+existing PRNG / collections / hash-set in `(jerboa prelude)`.
+No Chez core changes required.
+
+### Phase 77 — Generator combinators — LANDED 2026-04-27
+
+`(std clojure test-check)` exposes the canonical Clojure generator
+algebra:
+
+- `gen/return v` — constant generator
+- `gen/fmap f g` — map a function over generator output
+- `gen/bind g f` — monadic bind (gen → (val → gen))
+- `gen/choose lo hi` — uniform integer in [lo, hi]
+- `gen/elements coll` — uniform pick from a non-empty collection
+- `gen/one-of gens` — pick one generator uniformly, then sample
+- `gen/such-that pred g [tries]` — reject + retry
+- `gen/frequency [[w g] ...]` — weighted choice
+- `gen/tuple g ...` — independent product
+
+A generator is a record `(gen run)` whose `run` is `(rng size) → rose-tree`.
+RoseTrees are deferred to Phase 80; until then `run` returns a singleton
+rose `(rose value '())`.
+
+### Phase 78 — Built-in generators — LANDED 2026-04-27
+
+- `gen/boolean`, `gen/byte`, `gen/char`, `gen/char-alphanumeric`
+- `gen/int` (size-bounded), `gen/nat`, `gen/pos-int`, `gen/neg-int`,
+  `gen/large-integer` (full range scaled by size)
+- `gen/string`, `gen/string-alphanumeric`, `gen/string-ascii`
+- `gen/keyword`, `gen/symbol`, `gen/uuid`
+- `gen/list-of g`, `gen/vector-of g`, `gen/hash-set-of g`,
+  `gen/hash-map-of kgen vgen`
+- `gen/sized f` — size-aware combinator
+
+Sample size scales linearly with the runner's `size` parameter
+(default 0..200 over 100 iterations), matching Clojure semantics.
+
+### Phase 79 — Property runner — LANDED 2026-04-27
+
+- `(prop/for-all (binding ...) body)` macro — produces a property
+  record `(prop run)` where `run` is `(rng size) → result`.
+- `(quick-check num-tests prop [opts ...])` — runs `num-tests`
+  trials, returns a result map (ordered hashtable):
+  `{result, num-tests, seed, failing-size, fail, shrunk}`.
+- `(defspec name num-tests prop)` — defines a `mat`-friendly
+  zero-arg thunk that runs the property and asserts success.
+- Optional kwargs: `seed:` for reproducibility, `max-size:`.
+
+### Phase 80 — Shrinking via RoseTrees — LANDED 2026-04-27
+
+Standard test.check shrinking strategy:
+- Integer generators produce a rose whose children halve toward
+  the shrink target (0 by default).
+- List/vector generators shrink by removing elements.
+- `gen/fmap` lifts shrinks; `gen/bind` recursively shrinks.
+- On failure, the runner walks the rose tree breadth-first
+  looking for smaller failing inputs until no child fails.
+  Returns the smallest witnessed failure as `:smallest`.
+
+Implementation: `(rose value (delay children))` lazy stream of
+shrink candidates.  The runner uses `force` to walk lazily so
+generators with infinite shrink trees terminate.
+
+### Phase 81 — Tests, docs, commit — LANDED 2026-04-27
+
+- `tests/clojure/test-check-test.ss` (jerboa) covers:
+  every combinator, every built-in, `quick-check` success and
+  failure paths, shrinking convergence on classic counterexamples
+  (`(reverse (reverse xs)) = xs` is true; the false `(sort xs) = xs`
+  shrinks to `'(1 0)` or `'(0 -1)`).
+- `defspec` integration with the existing `mat` runner.
+- Cookbook recipe `clojure-test-check-quickcheck` saved via
+  `jerboa_howto_add` after green build.
+- Commit + push to jerboa master.
+
+### Round 13 wrap-up — LANDED 2026-04-27
+
+All five phases (77–81) implemented in jerboa repo as
+`lib/std/clojure/test-check.sls`.  No Chez core changes.
+Closes the post-Round-12 Clojure-parity audit; jerboa's stdlib
+now covers generators + shrinking + property assertions on top
+of the existing `(std spec)` validator.
+

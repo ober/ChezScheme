@@ -169,3 +169,85 @@ clean: $(ZUO_DEP)
 $(ZUO_TARGET): $(srcdir)/zuo/zuo.c
 	+ mkdir -p bin
 	+ $(CC_FOR_BUILD) $(CFLAGS_FOR_BUILD) -DZUO_LIB_PATH='"'"$(upsrcdir)/zuo/lib"'"' -o $(ZUO) $(srcdir)/zuo/zuo.c
+
+# ── Sync from upstream Cisco ChezScheme ──────────────────────────────────────
+# Our fork (github.com/ober/ChezScheme) carries local commits on top of
+# upstream/main (Round 12+ phases, jerboa-perf, secure, etc.). These targets
+# add an `upstream` remote pointing at cisco/ChezScheme and rebase our main
+# onto it so we pull in upstream bug fixes without losing local work.
+#
+# Use:
+#   make sync-upstream-status    — show ahead/behind, list new upstream commits
+#   make sync-upstream           — fetch upstream + rebase HEAD onto upstream/main
+#
+# After a successful rebase you'll need `git push --force-with-lease origin main`
+# to update your fork. Don't do that until you've also rebuilt and tested.
+
+UPSTREAM_URL := https://github.com/cisco/ChezScheme.git
+
+.PHONY: upstream-remote
+upstream-remote:
+	@if ! git remote get-url upstream >/dev/null 2>&1; then \
+	  echo "==> Adding upstream remote: $(UPSTREAM_URL)"; \
+	  git remote add upstream $(UPSTREAM_URL); \
+	else \
+	  current=$$(git remote get-url upstream); \
+	  if [ "$$current" != "$(UPSTREAM_URL)" ]; then \
+	    echo "==> upstream points to $$current (expected $(UPSTREAM_URL))"; \
+	    echo "    Run: git remote set-url upstream $(UPSTREAM_URL)"; \
+	    exit 1; \
+	  fi; \
+	fi
+
+.PHONY: sync-upstream-status
+sync-upstream-status: upstream-remote
+	@git fetch upstream --quiet
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	ahead=$$(git rev-list --count upstream/main..HEAD); \
+	behind=$$(git rev-list --count HEAD..upstream/main); \
+	echo "Branch: $$branch"; \
+	echo "Ahead of upstream/main:  $$ahead commits"; \
+	echo "Behind upstream/main:    $$behind commits"; \
+	echo ""; \
+	if [ "$$behind" = "0" ]; then \
+	  echo "Already up to date with upstream/main."; \
+	else \
+	  echo "Upstream commits not yet in $$branch (most recent first):"; \
+	  git log --oneline HEAD..upstream/main | head -30; \
+	fi
+
+.PHONY: sync-upstream
+sync-upstream: upstream-remote
+	@if ! git diff-index --quiet HEAD --; then \
+	  echo "==> Working tree has uncommitted changes — commit or stash first"; \
+	  git status --short; \
+	  exit 1; \
+	fi
+	@if [ -d .git/rebase-merge ] || [ -d .git/rebase-apply ]; then \
+	  echo "==> A rebase is already in progress — finish or abort it first:"; \
+	  echo "    git rebase --continue   (after fixing conflicts)"; \
+	  echo "    git rebase --abort      (give up and restore HEAD)"; \
+	  exit 1; \
+	fi
+	@echo "==> Fetching upstream ($(UPSTREAM_URL))..."
+	@git fetch upstream
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	ahead=$$(git rev-list --count upstream/main..HEAD); \
+	behind=$$(git rev-list --count HEAD..upstream/main); \
+	echo "==> $$branch is $$ahead ahead, $$behind behind upstream/main"; \
+	if [ "$$behind" = "0" ]; then \
+	  echo "==> Already up to date — nothing to rebase."; \
+	  exit 0; \
+	fi; \
+	echo "==> Rebasing $$branch onto upstream/main..."; \
+	if ! git rebase upstream/main; then \
+	  echo ""; \
+	  echo "==> Rebase hit a conflict. Resolve files listed by 'git status',"; \
+	  echo "    then 'git add <file>' and 'git rebase --continue'."; \
+	  echo "    Or 'git rebase --abort' to bail out."; \
+	  exit 1; \
+	fi
+	@echo "==> Rebase complete. Next steps:"
+	@echo "    1. make clean && ./configure --installprefix=/opt/homebrew && make && make install"
+	@echo "    2. Verify: scheme --version  and  rebuild jerboa-shell"
+	@echo "    3. git push --force-with-lease origin $$(git rev-parse --abbrev-ref HEAD)"
